@@ -1,0 +1,9 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+
+# catalog: 统一版本,关键约束——hono 前后端必须锁同版本(否则 hono/client RPC 类型会深层实例化爆炸)。
+catalog:
+  hono: 4.7.11
+  "@hono/zod-validator": 0.7.0
+  zod: 3.25.76

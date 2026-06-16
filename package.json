@@ -1,0 +1,42 @@
+{
+  "name": "shikigami",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Self-hosted anime torrent manager with qBittorrent + Jellyfin/Emby integration",
+  "type": "module",
+  "packageManager": "pnpm@10.17.1",
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "generate": "turbo run generate",
+    "ci": "turbo run generate typecheck test && pnpm check && turbo run build",
+    "lint": "biome lint .",
+    "check": "biome check .",
+    "check:fix": "biome check --write .",
+    "format": "biome format --write .",
+    "format:check": "biome format .",
+    "prepare": "simple-git-hooks || true",
+    "migrate": "pnpm --filter @shikigami/backend exec prisma migrate dev",
+    "db:push": "pnpm --filter @shikigami/backend exec prisma db push",
+    "studio": "pnpm --filter @shikigami/backend exec prisma studio"
+  },
+  "simple-git-hooks": {
+    "pre-commit": "pnpm exec biome check --staged .",
+    "pre-push": "pnpm typecheck"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.0",
+    "simple-git-hooks": "2.13.1",
+    "turbo": "2.9.18",
+    "typescript": "5.9.2"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@prisma/engines",
+      "prisma",
+      "esbuild"
+    ]
+  }
+}

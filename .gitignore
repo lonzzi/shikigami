@@ -1,0 +1,42 @@
+# dependencies
+node_modules/
+.pnpm-store/
+
+# turbo
+.turbo/
+
+# build output
+dist/
+build/
+.tsbuildinfo
+apps/backend/public/
+
+# generated
+apps/backend/generated/
+apps/backend/prisma/migrations/*/migration.sql.bak
+
+# runtime data (mount these in docker; 前导 / 只匹配仓库根, 不影响 apps/.../media)
+/data/
+/downloads/
+/media/
+/qbittorrent-config/
+/jellyfin-config/
+
+# env / secrets
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# editor / os
+.vscode/
+.idea/
+.DS_Store
+*.log
+
+# screenshots (local only)
+docs/shots/
+
+# test coverage
+coverage/

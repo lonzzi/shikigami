@@ -1,0 +1,91 @@
+# ============================================================
+# Shikigami Docker Compose
+# 架构评审修订: healthcheck + stop_grace_period + 路径收窄 + uid 统一(1000)
+#
+# 期望宿主目录结构（同文件系统，保证硬链接可用）:
+#   /mnt/media/downloads  ← qB 下载目录 + backend 读取
+#   /mnt/media/library    ← Jellyfin/Emby 媒体库 + backend 写入硬链接
+# 如你的路径不同，修改下面三处 volume 映射即可。
+# ============================================================
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: shikigami:latest
+    container_name: shikigami
+    restart: unless-stopped
+    user: "1000:1000"                       # 与 qB/jellyfin 统一 uid，硬链接权限打通
+    stop_grace_period: 35s                  # 略大于后端内部 30s 优雅关闭上限
+    environment:
+      TZ: Asia/Shanghai
+      DATABASE_URL: file:/data/shikigami.db
+    env_file: .env
+    volumes:
+      - ./data:/data                        # SQLite + JobRun 持久化
+      - ${MEDIA_ROOT:-/mnt/media}:/media     # 宿主同一文件系统
+      - ${DOWNLOADS_DIR:-/mnt/media/downloads}:/downloads
+      - ${LIBRARY_DIR:-/mnt/media/library}:/media/library
+    ports:
+      - "${BACKEND_PORT:-3000}:3000"
+    depends_on:
+      qbittorrent:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "bun", "-e", "fetch('http://localhost:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    networks: [shikigami]
+
+  qbittorrent:
+    image: lscr.io/linuxserver/qbittorrent:latest
+    container_name: shikigami-qbittorrent
+    restart: unless-stopped
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      TZ: Asia/Shanghai
+      WEBUI_PORT: "8080"
+    volumes:
+      - ${DOWNLOADS_DIR:-/mnt/media/downloads}:/downloads
+      - ./qbittorrent-config:/config
+    ports:
+      - "${QBT_WEBUI_PORT:-8080}:8080"
+      - "${QBT_BT_PORT:-6881}:6881"
+      - "${QBT_BT_PORT:-6881}:6881/udp"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8080/api/v2/app/version"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks: [shikigami]
+
+  jellyfin:
+    image: lscr.io/linuxserver/jellyfin:latest
+    container_name: shikigami-jellyfin
+    restart: unless-stopped
+    profiles: ["jellyfin"]                  # 可选: docker compose --profile jellyfin up
+    environment:
+      PUID: "1000"
+      PGID: "1000"
+      TZ: Asia/Shanghai
+    volumes:
+      # 收窄到 library，避免扫到 downloads
+      - ${LIBRARY_DIR:-/mnt/media/library}:/media:ro
+      - ./jellyfin-config:/config
+    ports:
+      - "${JELLYFIN_PORT:-8096}:8096"
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8096/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    networks: [shikigami]
+
+networks:
+  shikigami:
+    driver: bridge

@@ -1,0 +1,133 @@
+@import "tailwindcss";
+
+/*
+ * Shikigami · 和纸(Washi)亮色设计系统
+ * 设计原则: 柔和层次、精致间距、克制的朱/桜点缀、和纸质感背景
+ */
+
+@theme {
+  /* 基础色阶: 和纸米白系 */
+  --color-bg: oklch(0.985 0.004 85);
+  --color-surface: oklch(1 0 0);
+  --color-surface-2: oklch(0.97 0.005 85);
+  --color-surface-3: oklch(0.94 0.008 85);
+
+  /* 边框: 极淡,靠阴影区分层次而非生硬边线 */
+  --color-border: oklch(0.91 0.006 85);
+  --color-border-strong: oklch(0.84 0.01 85);
+
+  /* 文字: 墨色层次 */
+  --color-text: oklch(0.24 0.015 60);
+  --color-text-soft: oklch(0.4 0.015 60);
+  --color-muted: oklch(0.58 0.012 60);
+  --color-faint: oklch(0.72 0.01 60);
+
+  /* 品牌: 朱色(神社朱红),克制使用 */
+  --color-primary: oklch(0.56 0.2 27);
+  --color-primary-soft: oklch(0.94 0.04 27);
+  --color-primary-hover: oklch(0.5 0.2 27);
+
+  /* 辅助色 */
+  --color-navy: oklch(0.42 0.08 250);
+  --color-sakura: oklch(0.85 0.06 350);
+  --color-sakura-soft: oklch(0.96 0.02 350);
+
+  /* 语义色 */
+  --color-success: oklch(0.55 0.13 150);
+  --color-success-soft: oklch(0.95 0.04 150);
+  --color-warning: oklch(0.72 0.15 75);
+  --color-warning-soft: oklch(0.96 0.05 75);
+  --color-danger: oklch(0.52 0.22 27);
+  --color-danger-soft: oklch(0.95 0.05 27);
+  --color-info: oklch(0.55 0.12 240);
+  --color-info-soft: oklch(0.95 0.04 240);
+
+  /* 阴影: 柔和多层,和纸浮起感 */
+  --shadow-xs: 0 1px 2px oklch(0.3 0.01 85 / 0.04);
+  --shadow-sm: 0 1px 3px oklch(0.3 0.01 85 / 0.06), 0 1px 2px oklch(0.3 0.01 85 / 0.04);
+  --shadow-md: 0 4px 12px oklch(0.3 0.01 85 / 0.07), 0 2px 4px oklch(0.3 0.01 85 / 0.04);
+  --shadow-lg: 0 12px 28px oklch(0.3 0.01 85 / 0.09), 0 4px 10px oklch(0.3 0.01 85 / 0.05);
+
+  /* 圆角 */
+  --radius-sm: 6px;
+  --radius: 10px;
+  --radius-lg: 14px;
+  --radius-xl: 18px;
+}
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  /* 和纸质感: 双向暖色径向渐变,极淡 */
+  background:
+    radial-gradient(ellipse 80% 50% at 50% -10%, oklch(0.96 0.015 350 / 0.5), transparent),
+    radial-gradient(ellipse 60% 40% at 100% 100%, oklch(0.95 0.02 85 / 0.6), transparent),
+    var(--color-bg);
+  background-attachment: fixed;
+  color: var(--color-text);
+  font-family: "Inter", ui-sans-serif, system-ui, -apple-system, "PingFang SC", "Hiragino Sans", "Microsoft YaHei", sans-serif;
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  letter-spacing: -0.005em;
+}
+
+* {
+  border-color: var(--color-border);
+}
+
+/* 毛笔/明朝体 logo */
+.brush {
+  font-family: "Yu Mincho", "YuMincho", "Hiragino Mincho ProN", "Songti SC", "STSong", "Noto Serif JP", serif;
+  font-weight: 600;
+}
+
+/* 印章风: 朱底白字方块 */
+.seal {
+  background: linear-gradient(135deg, oklch(0.58 0.2 27), oklch(0.52 0.2 27));
+  color: white;
+  border-radius: var(--radius-sm);
+  font-family: "Yu Mincho", "Songti SC", "Noto Serif JP", serif;
+  letter-spacing: 0.05em;
+  box-shadow: var(--shadow-sm), inset 0 1px 0 oklch(1 0 0 / 0.2);
+}
+
+/* 卡片: 柔和浮起 */
+.card {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+  transition: box-shadow 0.2s, transform 0.2s, border-color 0.2s;
+}
+.card-hover:hover {
+  box-shadow: var(--shadow-md);
+  border-color: var(--color-border-strong);
+}
+
+/* 输入聚焦: 朱色细环 */
+input:focus-visible, textarea:focus-visible, select:focus-visible {
+  outline: none;
+  border-color: var(--color-primary) !important;
+  box-shadow: 0 0 0 3px oklch(0.56 0.2 27 / 0.12) !important;
+}
+
+/* 滚动条 */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: oklch(0.85 0.01 85);
+  border-radius: 8px;
+  border: 2px solid var(--color-bg);
+}
+::-webkit-scrollbar-thumb:hover { background: var(--color-faint); }
+
+/* 动效 */
+@keyframes fade-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+.fade-in { animation: fade-in 0.25s ease-out; }
+
+@keyframes spin { to { transform: rotate(360deg); } }
+.spin { animation: spin 0.8s linear infinite; }

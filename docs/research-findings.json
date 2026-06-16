@@ -1,0 +1,897 @@
+{
+  "数据库模型设计": {
+    "apiOrDataPoints": [
+      {
+        "detail": "GET https://share.dmhy.org/topics/rss/rss.xml?keyword=X&sort_id=2&team_id=Y — RSS 2.0。每 item 字段: title(CDATA `[字幕组] 作品名 / 罗马音 [集数][片源][分辨率][语言]`)、link(topic 永链, 含 topic_id)、pubDate(RFC2822 +0800)、author(发布者)、category(CDATA + domain 指向分类页)、enclosure(url=magnet 链接, length 固定 '1' 常见约定, type=application/x-bittorrent)。分类 sort_id: 2=动画, 31=季度全集。team_id 为字幕组 ID。",
+        "name": "dmhy RSS"
+      },
+      {
+        "detail": "已知页 `/Home/Bangumi/{bangumiId}`、订阅页 `/Home/MyBangumi`、列表 `/Home/Classic`。RSS 模式常为 `/RSS/Bangumi?bangumiId={id}`,返回该番全部字幕组资源。需注意 mikan 有反爬/Cloudflare,可能需配合 UA 与限频;合规只取公开 RSS,不绕验证码。",
+        "name": "mikan RSS"
+      },
+      {
+        "detail": "GET /v0/subjects/{subject_id} 返回 id/name/name_cn/summary/date/air_weekday/images/eps(总集数)/rating/collection 等。GET /v0/episodes?subject_id={id}&type={0|1|2|3|4|6}&limit=&offset= 分页返回集列表,每条: id/type/name/name_cn/ep(类型内集号)/sort(全局连续排序号)/airdate/duration/desc。公开读端点通常无需 token(有限流),写操作需 Bearer token;请求需合规 User-Agent。",
+        "name": "Bangumi v0 API"
+      },
+      {
+        "detail": "auth: POST /api/v2/auth/login(username,password) 返回 SID cookie,后续请求带 SID。加种: POST /api/v2/torrents/info 支持主键 hash;POST /api/v2/torrents/info(filter,category,tag,sort,hashes) 列表;GET /api/v2/torrents/properties?hash=X;POST /api/v2/torrents/setLocation(hashes,location);GET/POST /api/v2/torrents/categories|createCategory|setCategory;GET /api/v2/app/defaultSavePath。多 hash 用 `|` 分隔或 `all`。",
+        "name": "qBittorrent Web API"
+      }
+    ],
+    "confidence": "high",
+    "gotchas": [
+      "Prisma 在 SQLite 连接器上不支持原生 Json 字段类型(schema reference 明确标 Not supported;通用表误标 JSONB 是文档不一致)。所有结构化/半结构化字段必须用 String 存 + TS 层 serialize/parse,并强烈建议配 zod schema 做边界校验。",
+      "SQLite 无原生 enum,Prisma enum 在 SQLite 会被编译为 TEXT + 应用层校验,无数据库 CHECK 约束;脏数据需靠 service 层 enum 校验兜底。",
+      "文件大小、种子 total_size 必须用 BigInt(SQLite 支持,映射 INTEGER),绝不用 Float,否则大文件精度丢失(>2^53)。",
+      "级联删除语义差异: 生产路径(下载任务/媒体文件)用 onDelete: Cascade;但订阅关联用 SetNull 保留历史,避免删订阅连带抹掉下载审计;外键 onDelete 必须显式标注。",
+      "多站点抓取需处理反爬(Cloudflare/UA 校验/频控): 只取公开 RSS 与页面,不绕验证码/登录墙,带合规 User-Agent 与限频,遵守 robots 与站点 ToS。mikan/dmhy 可能间歇性封 IP,设计上要可重试可降级。",
+      "一磁链多订阅去重: 一个 infoHash 可能同时命中多个订阅(同一资源被多字幕组转发或多用户订阅同一番),必须用 MagnetSeen 表做全局去重,避免重复下载与 qB 重复 add 报错。",
+      "季/绝对集数映射是核心痛点也是高频 bug 源: RSS 标题里的集号可能是绝对集(跨季连续)或季内集,需 seasonOffset 字段 + 解析规则锚点(matchHints)记录判定依据,便于回溯与纠错;SP/OVA 要走 EpisodeType=SPECIAL 映射 S00E## 而非污染正片集号。",
+      "Bangumi v0 API 有限流且部分写操作需 Bearer token;公开读端点通常可匿名但务必带 User-Agent,生产应做本地缓存(eps/episodes 表)避免重复拉取。",
+      "DateTime 在 SQLite 存为 NUMERIC/STRING;若底层为 STRING 要求 RFC3339/RFC2822 格式,直接写裸 Date 字符串要当心格式。",
+      "迁移务必用 prisma migrate(非 db push)以便生产 deploy;但 prisma migrate 对 SQLite 有约束: 不支持在已有表上直接加 NOT NULL 列(需分多步 migration 加默认/回填),设计新表时尽量字段可空或有 default。",
+      "cuid() 与 uuid() 在 SQLite 均可用,但 cuid() 作为 String 主键默认值在所有 provider 表现一致,推荐统一用 cuid();避免自增 Int 主键(不利于多实例/分布式预生成 id)。"
+    ],
+    "libraries": [
+      {
+        "name": "prisma",
+        "version": "^6.19.x (当前稳定 6.19.2, 7.x 已有 7.6.0 但需确认 Bun 兼容)",
+        "why": "ORM 主体。建议锁定 6.19.x(生态最稳),先用 prisma-client(provider 6.x 新名)而非旧 prisma-client-js。升级 7.x 前先在 Bun 上跑通 migrate/client。"
+      },
+      {
+        "name": "@prisma/client",
+        "version": "随 prisma 主版本",
+        "why": "若用 generator provider=prisma-client,生成到 ../generated/prisma,无需单独安装 @prisma/client;若沿用 prisma-client-js 则仍需。"
+      },
+      {
+        "name": "zod",
+        "version": "^3.23+",
+        "why": "为所有 String-JSON 字段(filterRule/sourceConfigs/seasonOffset/scrapeResult/qbStateRaw/payload/result)定义 schema 并在 service 层强制 serialize/parse,补 SQLite 无 Json 字段类型 + 无 CHECK 约束的缺口。"
+      },
+      {
+        "name": "better-sqlite3 / @libsql/client",
+        "version": "Prisma 内置驱动无需手动",
+        "why": "Prisma 自带 SQLite 驱动,Bun 下 prisma migrate dev/deploy 均可用;Bun 跑 Prisma client 已官方支持,无需额外驱动包。"
+      }
+    ],
+    "recommendedApproach": [
+      "生成器用 Prisma 6.x: `provider = \"prisma-client\"`(6.x 新名,替代旧 prisma-client-js),`output = \"../generated/prisma\"`。datasource provider=sqlite, url 走 env DATABASE_URL(file:./data/shikigami.db)。",
+      "主键统一 String @id @default(cuid())(cuid() 在 SQLite 下 OK,避免自增 Int 在分布式/重建场景的麻烦;uuid() 也支持但 cuid 短)。",
+      "核心表 8 个 + 去重表 1 个: Anime, Episode, Subscription, DownloadTask, MediaFile, Settings(KeyValue), JobRun, 外加 MagnetSeen(跨订阅磁链去重)和 MagnetSeen 本身。",
+      "绝对集数映射的两层设计: Episode 表同时存 (a) bangumiEpId/sort(来自 Bangumi /v0/episodes 的 sort=全局连续), (b) absoluteNumber(作品级绝对集,粉丝常用), (c) epInSeason(本季集号,RSS 标题解析出的数字);并在 Anime.seasonOffset(String JSON)存 `{ \"2\": 12, \"3\": 24 }` 表示第2季续接第13集。解析 RSS 标题数字 N 时按 seasonOffset 倒推 seasonIndex 与 epInSeason。",
+      "EpisodeType enum 直接对齐 Bangumi Legacy_EpisodeType: MAIN=0本篇 / SPECIAL=1特别篇(映射 Jellyfin S00E##) / OP=2 / ED=3 / PREVIEW=4预告MAD / OTHER=6。这样 Bangumi API 返回无需二次映射。",
+      "去重双保险: DownloadTask.infoHash @unique + MagnetSeen.infoHash @unique。MagnetSeen 在 RSS 扫描阶段就记录(订阅匹配前),避免一个磁链被多订阅重复下载。",
+      "DownloadStatus enum 对齐 qBittorrent Web API /torrents/info 的 state: QUEUED/DOWNLOADING/PAUSED/SEEDING/COMPLETED/CHECKING/ERROR/REMOVED,字段 qbStateRaw(String JSON)存 qB 原始 state 快照做审计。",
+      "文件大小字段全部 BigInt(sizeBytes),绝不用 Float——Prisma SQLite 支持 BigInt(映射 INTEGER),避免大种子精度丢失。",
+      "MediaFile 走状态机 ScrapeState: PENDING→MATCHED→RENAMED→EXPORTED,FAILED 可重跑;一个 DownloadTask 可产出多个 MediaFile(正片+外挂字幕+字体),N:1 关系,onDelete: Cascade。",
+      "Settings 拆成 KeyValue 单表(key 作 @id, category 分组 general/downloader/scraper/library/notification),敏感值(qB cookie/Jellyfin token/OpenAI key)存 `enc:<iv>:<ciphertext>`,Docker 部署也防卷泄露;不要每类配置建一个表。",
+      "关键索引: Anime(status,airWeekday) 放送日历查询、Episode(animeId,absoluteNumber) 绝对集回溯、Subscription(status) 订阅扫描、MediaFile(scrapeState) 刮削待办、JobRun(kind,status,startedAt) 运行审计、MagnetSeen(sourceSite,sourceItemId) 站点回溯。",
+      "级联策略: 订阅->下载任务用 SetNull(删订阅保留历史),下载任务->媒体文件用 Cascade(删任务清文件记录),Anime->Episode 用 Cascade;所有外键显式标 onDelete,避免 Prisma 默认报错。",
+      "迁移用 prisma migrate(非 db push): 开发 `pnpm --filter backend prisma migrate dev --name init`,Docker entrypoint 跑 `prisma migrate deploy`。migrations/ 放 apps/backend/prisma/migrations/。",
+      "全文检索先不做: v1 用 Anime.title 上的普通 @@index + LIKE;数据量上来后用 raw migration 建 SQLite FTS5 虚表 + triggers 同步,Prisma 不直接支持 FTS5 但 raw migration 可写。",
+      "schema 文件我已写好完整可编译草稿: /tmp/shikigami-schema/schema.prisma(8 个模型 + MagnetSeen,含所有字段/索引/关系/注释),建议落到 apps/backend/prisma/schema.prisma 后跑 migrate dev 生成首个迁移。"
+    ],
+    "summary": "基于已确认技术栈(Hono+Bun / SQLite+Prisma 6.x / qBittorrent / Bangumi+dmhy),设计了 8 张核心表: Anime(作品条目,以 Bangumi subject_id 为权威锚)、Episode(集,含本季集号/绝对集号/Bangumi sort 三套编号解决季番绝对集映射痛点)、Subscription(订阅规则,JSON 存站点过滤参数)、MagnetSeen(跨订阅磁链去重)、DownloadTask(对接 qBittorrent 的 torrent)、MediaFile(落盘文件 + AI 刮削状态机)、KeyValue(配置)、JobRun(cron 运行审计)。核心设计取舍: Prisma SQLite 连接器不支持原生 Json 字段类型,所有结构化字段一律 String 存 + 应用层 zod 解析;文件大小用 BigInt(SQLite 支持)避免精度丢失;级联删除用 onDelete:Cascade/SetNull 显式声明。",
+    "topic": "动漫 BT 工具链数据库模型设计 (SQLite + Prisma)"
+  },
+  "Jellyfin & Emby API": {
+    "apiOrDataPoints": [
+      {
+        "detail": "POST /Library/Refresh — 全量扫描，需 admin(RequiresElevation)，返回 204。Jellyfin/Emby 通用(Emby 下为 /emby/Library/Refresh)。GitHub 源码确认。",
+        "name": "Jellyfin 全量扫描"
+      },
+      {
+        "detail": "POST /Library/Series/Updated?tvdbId=xxx — 按 tvdbId 触发该番剧路径的增量刷新，无需全量扫描,无需 admin,普通认证即可。同样有 /Library/Movies/Updated?tmdbId=。最推荐下载完成后的单集刷新方式。",
+        "name": "Jellyfin 增量按系列刷新"
+      },
+      {
+        "detail": "POST /Library/Media/Updated,body 含 Updates:[{Path:\"...\"}] 数组,对每个路径调 ReportFileSystemChanged。适合批量通知新文件路径。",
+        "name": "Jellyfin 按路径刷新"
+      },
+      {
+        "detail": "GET /ScheduledTasks → 找 Key=\"RefreshLibrary\" 的任务拿 Id;POST /ScheduledTasks/Running/{Id} 启动;GET /ScheduledTasks/{Id} 查 State(Idle/Running);DELETE 停止。Emby 路径前缀 /emby/。",
+        "name": "Jellyfin ScheduledTasks"
+      },
+      {
+        "detail": "Authorization: MediaBrowser Token=\"<apikey>\", Client=\"shikigami\", Device=\"server\", DeviceId=\"<uuid>\", Version=\"1.0\";或直接 ?api_key=<apikey>。Emby 用 X-Emby-Token 头或 ?api_key=,登录用 POST /emby/Users/AuthenticateByName 返回 AccessToken。",
+        "name": "认证头"
+      },
+      {
+        "detail": "tvshow.nfo(剧集)、movie.nfo(电影)、<文件名>.nfo(单集)、season.nfo(季)。关键标签:<title> <plot> <uniqueid type=\"tvdb\"> <tvdbid> <imdbid> <tmdbid> <seasonnumber> <episode> <aired> <year> <genre> <studio> <art>。Jellyfin 本地 NFO 优先于网络刮削,无法关闭。",
+        "name": "NFO 文件"
+      },
+      {
+        "detail": "Series Name (2024)/Season 01/Series Name (2024) S01E01 [1080p][CH].mkv;季文件夹必须 'Season 01' 不能写 S01;多集 S01E01-E02;绝对集映射靠 NFO <episode> 标签 + scudlee 映射表。",
+        "name": "命名规范"
+      },
+      {
+        "detail": "Jellyfin 路径为根 /,Emby 路径带 /emby/ 前缀;Jellyfin 不再提供 /emby/ 兼容前缀(已查源码确认);默认端口均可 8096,需为后端容器配置。",
+        "name": "路径前缀差异"
+      }
+    ],
+    "confidence": "high",
+    "gotchas": [
+      "路径前缀差异最大坑:Jellyfin 用根路径 /,Emby 用 /emby/ 前缀。代码里必须按 serverType 切换 base path,否则 Emby 调用全部 404。Jellyfin 不再提供 /emby/ 兼容前缀(已查 Jellyfin Startup.cs/ApiServiceCollectionExtensions.cs 源码确认,旧资料说 Jellyfin 兼容 /emby/ 是过时的)。",
+      "认证头名称不同:Jellyfin 用 'Authorization: MediaBrowser Token=...',Emby 登录后用 X-Emby-Token 头(或 api_key query)。两者都支持 api_key query 参数,代码里统一用 api_key query 可减少差异,但 Emby 官方推荐用 X-Emby-Token 头。",
+      "POST /Library/Refresh 在 Jellyfin 需要 admin(RequiresElevation 策略),普通用户 token 会 403。API key(管理员创建)默认有 admin 权限,推荐用 API key 而非普通用户 token。",
+      "POST /Library/Series/Updated?tvdbId= 只触发该 series 路径的文件系统变更通知,不会强制重读 NFO;若修改了 NFO 内容,需配合全量扫描或 ScheduledTasks 的 RefreshLibrary 任务才能保证 NFO 被重新解析(Emby/Jellyfin 对已存在的 item 的 NFO 更新不会自动热重载)。",
+      "绝对集数 vs SxxExx 是动漫核心痛点:BT 文件多为绝对集(如 SPY×FAMILY 第25集),而 Jellyfin/Emby 按 TheTVDB 的季-集结构组织。必须维护 scudlee/anidb→tvdb 映射(第三方 JSON)或要求用户提供季番/绝对集对应关系,否则扫描后集数会错乱。AutoBangumi 的做法是直接重命名为 S01E0x 并写 NFO 强制对应。",
+      "NFO 本地优先策略:Jellyfin 文档明确 '本地 NFO 总是优先于远程(TMDb/TVDb),无法关闭'。这意味着我们写错的 NFO 会覆盖正确的网络元数据,刮削逻辑必须严谨;反之也意味着我们可以靠 NFO 精确控制条目识别(写对 <uniqueid> 即可锁定匹配)。",
+      "多 part/合并集命名:S01E01-E02 会被识别为单条目(显示多集元数据),S01E01-part-1/S01E01-part-2 会被 stack 为同一集。字幕组出包的合并文件需注意,重命名时建议拆分或用 part 命名。",
+      "中文用户场景:Jellyfin/Emby 对中文番名匹配依赖元数据提供方(TheTVDB/番组计划/bangumi),建议 NFO 同时写中文 <title> 与原日文 <originaltitle>,并写 <uniqueid> 锁定,避免扫描后中文标题丢失或匹配到错误条目。",
+      "Emby 部分高级 API(如 /Library/Refresh 的精确行为、部分 ScheduledTasks)在官方 Swagger(swagger.emby.media)是 JS 动态渲染,WebFetch 抓不到;Emby 的 dev.emby.media 旧 wiki 已标记为 legacy。建议运行时探测:先 GET /emby/ScheduledTasks 列出任务找 'RefreshLibrary' key 的 Id,再 POST running/{Id},避免硬编码 task Id。",
+      "API key 获取:Jellyfin 用 POST /Auth/Keys?app=<name>(需 admin)动态创建,或管理员在 Dashboard 手动创建;Emby 需管理员在 Dashboard→Expert→Advanced→Security 手动 Add(无 API 端点直接创建,需引导用户手动填)。",
+      "法律合规:本工具只触发媒体服务器本地库扫描、读取本地 NFO,不涉及任何抓取站点绕过;所有刮削元数据来源应使用公开 API(bangumi/TheTVDB 公开接口),不绕过验证码。"
+    ],
+    "libraries": [
+      {
+        "name": "hono",
+        "why": "后端框架,提供 hono/client RPC,用于实现 /admin/scan 等触发端点"
+      },
+      {
+        "name": "jellyfin-apiclient (typescript @jellyfin/sdk)",
+        "why": "若不想手写 fetch,可用官方 Jellyfin TypeScript SDK(@jellyfin/sdk,当前在 npm)封装认证/扫描;但 SDK 较重,本场景直接 fetch 更轻"
+      }
+    ],
+    "recommendedApproach": [
+      "认证模型:统一用「API Key」而非用户名密码,避免管理 token 生命周期。Jellyfin:管理员在 Dashboard→API Keys 创建,或调 POST /Auth/Keys?app=shikigami(需已认证的管理员 token)。Emby:管理员在 Dashboard→Advanced→Security→Add API Key 创建(无创建 API 端点,只能 UI 操作)。把 key 存后端 Prisma 的 ServerConfig 表。",
+      "认证 Header 实现(Jellyfin):优先用 query 参数 ?api_key=<KEY> 最简单;若用 header,格式严格为 `Authorization: MediaBrowser Token=\"<KEY>\", Client=\"shikigami\", Device=\"server\", DeviceId=\"<固定uuid>\", Version=\"1.0.0\"`(注意 Client/Device/DeviceId/Version 必填,空值会 401)。",
+      "认证 Header 实现(Emby):header `X-Emby-Token: <KEY>` 或 query `?api_key=<KEY>`。两者都支持 api_key query,所以代码里对两个服务器统一用 ?api_key= 可大幅简化,但 Emby 官方示例用 header X-Emby-Token,兼容性最好两个都带。",
+      "触发扫描首选「增量按系列刷新」而非全量扫描(快、省资源):Jellyfin/Emby 都支持 POST {base}/Library/Series/Updated?tvdbId=<番剧tvdbid>。base 对 Jellyfin 是 http://host:8096/,对 Emby 是 http://host:8096/emby/。这只会让服务器重新读取该番剧路径下的新文件,适合「下载完成→改名→触发单集刷新」的流程。",
+      "全量扫描兜底:POST {base}/Library/Refresh(Jellyfin 需管理员权限 RequiresElevation;Emby 同路径存在)。返回 204 表示已排队。或用 ScheduledTasks:GET {base}/ScheduledTasks 拿到 Key==\"RefreshLibrary\" 的任务 Id,再 POST {base}/ScheduledTasks/Running/{Id}。ScheduledTasks 路径在两个服务器上完全一致(只是 base path 前缀不同),推荐作为跨服务器统一实现。",
+      "代码抽象建议:在 apps/backend 写一个 MediaServerClient 接口,两个实现 JellyfinClient / EmbyClient,差异只在 baseUrl 前缀(Jellyfin '/' vs Emby '/emby/')和 header 名。Hono 路由 POST /api/admin/library/scan 接受 {serverType, tvdbId?, full?:boolean} 转发。",
+      "NFO 写入(推荐主路径):每个番剧目录放 tvshow.nfo(锁 <tvdbid> 或 <uniqueid type=\"tvdb\"> 让服务器精确匹配 TheTVDB 条目,避免中文番名匹配错乱),每集放 <文件名>.nfo 含 <seasonnumber> <episode> <aired> <title>。绝对集映射关键:在 episode nfo 里写映射后的 SxxExx,这样即使文件名是绝对集,Jellyfin/Emby 也能按 NFO 归位。",
+      "重命名格式(符合 Jellyfin/Emby 默认识别,无需插件):`<番名> (<年>)/Season <两位季>/<番名> (<年>) S<两位季>E<两位集> [<分辨率>][<字幕组>].<扩展名>`,例如 `葬送的芙莉莲 (2023)/Season 01/葬送的芙莉莲 (2023) S01E01 [1080p][ANi].mkv`。季文件夹必须写 'Season 01' 不能写 'S01'(Jellyfin 官方明确警告)。",
+      "绝对集→SxxExx 映射:这是动漫场景核心痛点。BT 文件通常是绝对集(如 [ANi] 葬送的芙莉莲 - 25),而 Jellyfin/Emby 按 TheTVDB 的季-集组织。建议后端内置映射表(可复用社区 scudlee 的 anidb→tvdb 映射 JSON,或让 AI 刮削时根据 bangumi/theTVDB 数据生成本季的绝对集↔SxxExx 对照),重命名时按映射转换成 S01E0x。",
+      "多 part / 合并集:字幕组常有合并集(如 S01E01-E02),Jellyfin 支持 `Series S01E01-E02.mkv` 命名但会显示为单条目(合并元数据);part 命名用 `Series S01E01-part-1.mkv` / `S01E01-part-2.mkv`(支持的 part 标记:cd/dvd/part/pt/disc/disk)。建议优先拆分为单集,除非是真正的合并放送。",
+      "Specials(OVA/剧场版):放 Season 00 文件夹,命名 S00Exx。可在 nfo 用 <airsbefore_season>/<airsbefore_episode> 标签控制其在正片间的显示顺序,这对季番番外尤其有用。",
+      "元数据锁定(防覆盖):在 Jellyfin/Emby 库设置里把该番剧的元数据下载器设为优先 NFO/本地,并锁定字段(Lock),避免服务器用 TMDb/TVDb 远程覆盖我们 AI 刮削的中文标题/字幕组信息。或直接在 NFO 里写全所有字段靠「本地优先」策略。"
+    ],
+    "summary": "Jellyfin 与 Emby 同源,REST API 高度兼容但有差异:认证头不同(Jellyfin 用 `Authorization: MediaBrowser Token=...` 或 `api_key=` query,Emby 用 `X-Emby-Token` 头或 `api_key=` query),路径前缀不同(Jellyfin 根路径 `/`,Emby 用 `/emby/`)。触发库扫描:Jellyfin 有 `POST /Library/Refresh`(需 admin 权限,返回 204),两个服务器都支持按 ScheduledTasks 触发,扫描任务 Key 固定为 `\"RefreshLibrary\"`;最省资源的方式是「按系列增量刷新」`POST /Library/Series/Updated?tvdbId=<id>`,只通知该番剧路径变更。元数据建议直接写 NFO 文件(tvshow.nfo / <file>.nfo),Jellyfin 本地 NFO 优先级高于网络刮削(无法关闭),Emby 同样读 NFO;动漫绝对集数需靠 NFO 的 seasonnumber/episode 标签 + SxxExx 文件名映射,这是核心痛点。",
+    "topic": "Jellyfin & Emby API：刮削后重命名并触发媒体服务器扫描库"
+  },
+  "参考架构与最佳实践": {
+    "apiOrDataPoints": [
+      {
+        "detail": "POST multipart,字段 urls/torrents,savepath,category,tags,paused",
+        "name": "qBittorrent Web API v2 /api/v2/torrents/add"
+      },
+      {
+        "detail": "POST multipart,需 hash+oldPath+newPath(API v2.4.0+,v2.8.0 改参数)",
+        "name": "qBittorrent /api/v2/torrents/renameFile"
+      },
+      {
+        "detail": "GET 返回 name/state/save_path/category/tags,可 filter=seeding 做完成回调",
+        "name": "qBittorrent /api/v2/torrents/info"
+      },
+      {
+        "detail": "GET,Bearer 鉴权,append_to_response 一次取多季;episodes[].episode_number/season_number/still_path",
+        "name": "TMDB v3 GET /3/tv/{series_id}/season/{season_number}"
+      },
+      {
+        "detail": "POST 搜番(type=2 动画);GET /v0/episodes?subject_id=&type=0&limit=100&offset= 取剧集列表;强制描述性 User-Agent",
+        "name": "Bangumi v0 POST /v0/search/subjects 与 GET /v0/episodes"
+      },
+      {
+        "detail": "按番订阅 RSS;item.enclosure 为种子链接,含自定义 torrent 命名空间",
+        "name": "Mikan /RSS/Bangumi?bangumiId={id}"
+      },
+      {
+        "detail": "动漫分类=2,季度全集=31;关键字+字幕组组合订阅",
+        "name": "DMHY /topics/rss/rss.xml?keyword=&team_id=&sort_id="
+      },
+      {
+        "detail": "POST application/json,字段 chat_id/text/parse_mode/disable_notification",
+        "name": "Telegram https://api.telegram.org/bot<token>/sendMessage"
+      },
+      {
+        "detail": "POST 扫描全库;X-Emby-Token 头鉴权;导入完成后触发",
+        "name": "Jellyfin POST /Library/Refresh"
+      },
+      {
+        "detail": "hardlink(src,dst) 复用 inode 实现做种+刮削双赢,要求同文件系统",
+        "name": "Node fs.link()"
+      }
+    ],
+    "confidence": "high",
+    "gotchas": [
+      "硬链接必须同文件系统: qBittorrent 下載目錄、媒体库目录、整理目录必须在同一 Docker volume / 同一物理分区,否则 fs.link 报 EXDEV,只能 fallback 到 copy(双倍磁盘占用)。Docker Compose 里务必把同一 host 路径同时挂到 backend 和 qBittorrent 容器。",
+      "绝对集数映射无标准答案: 不同字幕组、不同季度命名规则各异(如《咒术回战》拆多季 vs 合并);TMDB 的 season/episode 与粉丝常用的'全篇第N集'经常冲突。建议让 AI + Bangumi 双源辅助映射,并提供手动覆盖表存 SQLite,切勿纯自动且不可改。",
+      "anitomy(纯 TS 版)0.0.35 针对动漫花园优化,但对欧美/通用命名支持弱;@ctrl/qbittorrent(v9.13.0)与 ofetch 配合良好但注意 Bun 兼容性需实测(ofetch 基于fetch, Bun 原生支持,一般没问题)。",
+      "qBittorrent renameFile 是'按文件路径重命名',改的是种子内部文件名;跨目录移动 qB 还没直接 API,需配合 savepath/自动TMM 或操作物理文件后重新校验。Bun 下 fs.rename 移动跨设备会失败,务必确保同分区。",
+      "TMDB 绝对集数支持差: TMDB 把每季当独立 season,长番(500+集)在 TMDB 上常被拆成多个'季',与 TVDB/Bangumi 的'绝对编号'不一致;Anime 的 absolute numbering 在 TMDB 上是 episode groups(/tv/{id}/episode_groups)里的 absolute order,需要单独取。",
+      "抓取类站点反爬: dmhy/mikan/nyaa 都对高频请求有限流甚至封 IP;RSS 拉取间隔建议 ≥15 分钟且带描述性 User-Agent;Bangumi 强制要求描述性 UA(写 应用名+GitHub/联系),否则 403。不要绕验证码、不要爬私有/登录内容。",
+      "Telegram 在国内网络通常需要代理;Bot 主动推送(sendMessage)不受影响,但 getUpdates 长轮询可能超时。建议把代理(HTTPS_PROXY)做成可选配置项。",
+      "微信通知无官方 Bot API: nastools 等用的多是企业微信(wechat-work)群机器人 webhook(https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=),仅群消息、频率限30条/分钟,且对非企业微信成员不友好;建议优先 Telegram。",
+      "法律合规: 项目仅做公开 RSS/页面的聚合与整理,不做内容分发、不内置 tracker、不绕过付费墙/验证码;README 应明确'仅供学习交流、用户自负合规责任',并避免提供受版权保护的种子直链。",
+      "Docker 部署时,qBittorrent 容器与 backend 容器对同一文件的属主/权限可能不一致(如 one PUID/PGID vs root),硬链接创建后 Jellyfin 可能读不到,需统一 PUID/PGID 或对 media 目录设 ACL。"
+    ],
+    "libraries": [
+      {
+        "name": "@ctrl/qbittorrent",
+        "version": "9.13.0",
+        "why": "最活跃的 TS qBittorrent Web API 封装(基于 ofetch),覆盖 add/info/files/renameFile,适合后台下载器集成"
+      },
+      {
+        "name": "anitomy",
+        "version": "0.0.35",
+        "why": "纯 TypeScript 的 anitomy 移植,且针对动漫花园(dmhy)命名优化,免去原生依赖编译;若解析覆盖率不足再考虑 npm anitomy-js@5.4.0(node 原生绑定)"
+      },
+      {
+        "name": "openai",
+        "version": "^4",
+        "why": "官方 SDK,兼容任意 OpenAI 兼容端点(base_url 可指 Ollama /v1),用于刮削补全与命名清洗"
+      },
+      {
+        "name": "cron",
+        "version": "^3",
+        "why": "纯 TS cron 解析+调度,配合 Bun 进程内定时器实现 RSS Sync 等周期任务"
+      },
+      {
+        "name": "fast-xml-parser",
+        "version": "^4",
+        "why": "纯 TS、无依赖的 RSS/XML 解析,用于 dmhy/mikan/nyaa RSS"
+      },
+      {
+        "name": "p-queue",
+        "version": "^8",
+        "why": "并发可控的内存任务队列,实现 *arr 式 history/queued 任务流"
+      },
+      {
+        "name": "grammy 或 telegraf",
+        "version": "最新",
+        "why": "Telegram Bot 框架,推送下载/刮削结果通知;grammy 更轻量、TS 友好"
+      },
+      {
+        "name": "@hono/zod-openapi + hono/client",
+        "version": "^4",
+        "why": "前后端类型安全 RPC(monorepo 已定 Hono 栈),订阅/事件接口契约"
+      }
+    ],
+    "recommendedApproach": [
+      "解析层: npm i anitomy@0.0.35 (纯 TS,无原生依赖,针对 dmhy 优化) 作为文件名主解析器;备用 npm i anitomy-js@5.4.0(node 原生绑定,需编译,解析更全)。anitomy 返回的元素键: anime_title / episode_number / episode_number_alt / release_version / release_group(fansub)/ video_resolution / video_term / audio_term / file_checksum。匹配前用 OpenAI 兼容 API 对'模糊标题(别名/罗马音/中文译名)做归一化'。",
+      "下载器集成: npm i @ctrl/qbittorrent@9.13.0 (TS,基于 ofetch)。核心方法: client.login()/client.addTorrent({urls/torrents, savepath, category, tags, paused}) / client.listTorrents({filter,category}) / client.torrentFiles({hash}) / 完成回调后用 client.renameFile({hash, oldPath, newPath})。或直接裸 fetch POST /api/v2/torrents/add。",
+      "RSS 抓取: 主源 dmhy GET https://share.dmhy.org/topics/rss/rss.xml?keyword={}&team_id={}&sort_id=2(2=动画);mikan GET https://mikanani.me/RSS/Bangumi?bangumiId={id}(item.enclosure.url 即种子直链);nyaa.si GET https://nyaa.si/?page=rss&q={}&c=1_0(1_0=动漫全部)。统一 fast-xml-parser 解析,周期 cron 拉(建议 ≥15 分钟,低频避反爬)。",
+      "元数据双源: TMDB v3 用 Bearer 鉴权,GET https://api.themoviedb.org/3/tv/{series_id}/season/{season_number}(query language=zh-CN) 拿 episodes[].episode_number/name/overview/still_path;Bangumi v0 用 GET https://api.bgm.tv/v0/episodes?subject_id={id}&type=0&limit=100&offset=0 拿中日剧集名 + 必须设描述性 User-Agent 头(如 'shikigami/1.0 (https://github.com/xxx)')。两源都落到 Prisma 表,episode_number 对齐成'显示集数',绝对集数单独存 absolute_number 字段。",
+      "绝对集数映射: 这是核心痛点。参考 Sonarr 的'Season/Episode'与'Absolute Episode'双轨制——Prisma 的 Episode 表同时存 season/episode_in_season/absolute_number。TMDB 对长番绝对集数支持差,优先用 Bangumi 的 episode sort 推导,或让 AI 根据文件名+季度信息补全;给用户手动覆盖入口。",
+      "硬链接做种+刮削: 设计双目录——downloads(qBittorrent 的 savepath,保持做种)+ media(媒体库根)。在 Bun 后端用 Node fs.link(src,dst) 在 media 下建硬链接(不复制数据,改任一份都生效,qB 仍可做种)。前提: downloads 与 media 必须在同一文件系统(Docker Compose 用同一 volume / 同一 host 分区),否则 link 报 EXDEV,只能 fallback 到 fs.copyFile(磁盘翻倍)。务必在文档强调同分区。",
+      "文件夹/文件命名(对齐 Jellyfin/Emby 标准): 库根 /tv/{番名 (年)}/Season {XX}/{番名} - S{XX}E{NN} - {集名}.mkv;多季季度番用 S01E01..;长番用 S01E001 三位或 absolute。元数据导出 tvshow.nfo(整剧)+ {番名} - S{XX}E{NN}.nfo(单集)+ poster.jpg/fanart.jpg,封面图用 TMDB 的 https://image.tmdb.org/t/p/original{poster_path}。这些 NFO 让 Jellyfin/Emby 在 TMDB 缺失时也能正确刮削。",
+      "事件流(仿 *arr): 单向 pipeline,Prisma 表 jobs(id,type,status,ref_id,run_at)。SCHEDULER(进程内,用 npm i cron@3 或 Bun.setInterval)周期触发: Refresh(全量 RSS 拉取去重)-> RSS Sync(增量匹配订阅规则)-> Search(对缺失集数主动搜)-> Decision(过滤:分辨率/字幕组/大小/黑名单)-> Download(qB addTorrent,paused=false)-> 完成回调(qB /torrents/info filter=seeding 轮询或 webhook)-> Import(hardlink + rename + 下载封面/NFO)-> Notify。用 npm i p-queue@8 做并发限制的内存队列。",
+      "媒体库扫描: 导入完成后,后端 POST http://{jellyfin}:8096/Library/Refresh (Header: X-Emby-Token: {key}) 触发全库扫描;或更细粒度 POST /Library/VirtualFolders/Paths 加新路径(refreshLibrary=true)。Emby 用同样路径 + X-Emby-Token(Emby/Jellyfin API 同源)。",
+      "通知: Telegram 用裸 fetch POST https://api.telegram.org/bot{token}/sendMessage (JSON body: chat_id, text, parse_mode=HTML, disable_notification)。建议封装 Notifier 抽象,支持多渠道:Telegram + 企业微信群机器人(webhook: https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key={key},POST JSON msgtype=text + text.content);微信无官方 Bot API,nastools 走的是企业微信 webhook。Webhook 出口(下载完成/刮削失败/低分辨率告警)统一从事件流末端触发。",
+      "AI 刮削对齐: OpenAI 兼容 client(base_url 可指 http://localhost:11434/v1 走 Ollama)。用法:输入 fansub 文件名 + 候选 TMDB/Bangumi 搜索结果,prompt 要求输出结构化 JSON {tmdb_id, season, episode, confidence, reasoning};confidence < 阈值则进'人工确认'队列,前端用 hono/client RPC 拉。这比纯规则正则更能处理字幕组花式命名。"
+    ],
+    "summary": "参考架构的核心模式可总结为三条主线:(1)*arr 的\"订阅-调度-决策-导入-重命名-通知\"事件流,进程内 cron 周期拉取 RSS + 内存任务队列驱动;(2)nastools/AutoBangumi 的\"硬链接(hardlink)做种+刮削\"双目录方案,让 qBittorrent 继续做种的同时给 Jellyfin/Emby 一份符合命名规范的媒体副本,要求 downloads 与 media 必须在同一文件系统;(3)绝对集数映射是中文动漫社区第一痛点,TMDB 的 season/episode 与 fansub 的绝对集数不一致,需用 TMDB episode groups + Bangumi(bgm.tv)双源对齐,再叠加 AI 兜底。具体技术栈落地见下方,所有 API 端点均经当前文档核实。",
+    "topic": "参考架构与最佳实践: nastools / Sonarr·Radarr(*arr) / AutoBangumi 的可借鉴模式"
+  },
+  "Hono 后端架构": {
+    "apiOrDataPoints": [
+      {
+        "detail": "当文件含 default export { port, fetch } 时,Bun 自动用 Bun.serve 包装(等价于显式 Bun.serve({port,fetch}))",
+        "name": "Bun.serve 入口"
+      },
+      {
+        "detail": "返回 Promise,默认优雅关闭(等待 in-flight 请求/WS 完成);传 true 立即强制关闭所有连接",
+        "name": "server.stop(closeActiveConnections?)"
+      },
+      {
+        "detail": "5 字段表达式,支持 @daily 等昵称与命名值 MON-FRI/JAN;parse 返回下次触发 Date|null(8年内无匹配则 null)",
+        "name": "Bun.cron(expression, callback)"
+      },
+      {
+        "detail": "对 Hono app 应使用 fetch: app.fetch;routes 适合零依赖快速路由,不适合 Hono app",
+        "name": "Bun.serve routes vs fetch"
+      },
+      {
+        "detail": "无参返回优雅关闭(等待 in-flight);反例:Node 端 @hono/node-server 的 server.close() 需回调",
+        "name": "server.stop() 的参数语义"
+      },
+      {
+        "detail": "OpenAPI 3.1,通过 app.doc('/doc', {...}) 或 app.openapiRegistry.register() 输出",
+        "name": "OpenAPI 文档端点"
+      },
+      {
+        "detail": "hono/client,hc<AppType>(baseUrl) 返回带 $get/$post 等方法的类型安全客户端",
+        "name": "hc 客户端"
+      },
+      {
+        "detail": "可设 idempotent:false;内置支持包括 POST 请求",
+        "name": "cors 中间件选项"
+      },
+      {
+        "detail": "可传 verifyToken(token,c)=>boolean|Promise<boolean>,支持异步校验(对接用户表/会话)",
+        "name": "bearerAuth 中间件"
+      },
+      {
+        "detail": "HTTPException 的 getResponse() 直接返回预设响应;自定义错误需在 onError 内分支处理",
+        "name": "app.onError"
+      }
+    ],
+    "confidence": "high",
+    "gotchas": [
+      "版本锁定陷阱:@hono/zod-openapi@1.4.0 的 peer dep 强制 zod ^4.0.0;若同时混装 zod v3 会类型/运行时出错。全栈统一 zod v4(@hono/zod-validator 0.8.0 双兼容,可平滑)。monorepo 建议把 zod 提到 catalog 集中管理,避免多版本共存破坏类型推断。",
+      "Bun.serve 的 idleTimeout 默认仅 10 秒:对 RSS 抓取、qBittorrent 长任务、AI 刮削等慢响应接口,务必在 Bun.serve 配置里调高 idleTimeout(如 120),或对单请求用 server.timeout(req, 0) 关闭。否则长请求会被 RST。",
+      "Bun.serve 的 maxRequestBodySize 默认约 128MB(旧值)/受 body-limit 影响;上传种子文件/刮削数据时需显式配置 maxRequestBodySize,否则大请求体被拒。",
+      "Hono Bun 的 export default { fetch: app.fetch } 写法无法拿到 server 引用来做优雅关闭/指标查询。生产应改用 const server = Bun.serve({fetch: app.fetch}) 显式持有引用,以便 SIGTERM 时 await server.stop()。",
+      "cron + 单进程=单点:进程内 cron 在重启/崩溃期间会漏执行任务(如定时抓 RSS)。对关键调度需在 DB 记录 last_run,启动时补跑;或评估 OS 级 Bun.cron('./worker.ts', expr, name) 持久化方案。",
+      "hono/client RPC 类型膨胀:项目变大后 AppType 联合类型可能让 TS 编译变慢。若出现性能问题,可按模块拆分多个 AppType 或用 tsbuildinfo 增量编译。",
+      "前端独立项目通过 hono/client RPC 调后端时,若前后端分别构建/部署(不同端口或不同 origin),必须配置 CORS(cors 中间件)且 origins 白名单匹配;同源反代则可省。",
+      "serveStatic 的 root 是相对进程 CWD,容器内 CWD 必须正确(Dockerfile 里 WORKDIR 要对齐),否则前端 SPA 兜底 404。",
+      "Bun 版本要求:HTML imports、Bun.cron 等需 Bun 1.2+/最新稳定版;@hono/zod-openapi 1.4.0 要求 hono >=4.10.0。建议 Dockerfile 用 oven/bun:1.3 基础镜像。",
+      "抓取类站点(dmhy/mikan)注意反爬与法律合规:只消费公开 RSS/页面、设置合理请求间隔(配合 cron 限频)、不绕过验证码/Cloudflare。",
+      "不确定项:Hono 4.12.x 相对 4.10 的具体 breaking changes 未逐一核实(均为 patch/minor 升级,风险低);@hono/zod-openapi 1.4.0 对 @asteasolutions/zod-to-openapi 8.x 的 API 细节(register 扩展点)未深入,采用前建议跑通一个端到端示例。"
+    ],
+    "libraries": [
+      {
+        "name": "hono",
+        "version": "^4.12.25",
+        "why": "核心 Web 框架,2026-06-09 最新。Web Standards,原生支持 Bun。满足 RPC/中间件/路由/错误处理全部需求"
+      },
+      {
+        "name": "@hono/zod-validator",
+        "version": "^0.8.0",
+        "why": "路由层 schema 校验,peer dep zod ^3.25||^4.0 + hono >=4.10。生成 RPC 类型所需(校验过的 query/body 才有类型)"
+      },
+      {
+        "name": "zod",
+        "version": "^4.4.3",
+        "why": "Schema 校验核心。v4 已发布,且 @hono/zod-openapi 强制 v4。全栈统一 v4 避免版本冲突"
+      },
+      {
+        "name": "@hono/zod-openapi",
+        "version": "^1.4.0",
+        "why": "OpenAPI 可选方案。OpenAPIHono 类自动生成 3.1 文档;强制 zod ^4 + hono >=4.10。用则需锁定 zod v4"
+      },
+      {
+        "name": "@scalar/hono-api-reference",
+        "version": "^0.11.3",
+        "why": "OpenAPI 文档 UI(Scalar),比 Swagger UI 现代美观。挂载一行代码,主题 kepler/modern"
+      },
+      {
+        "name": "prisma / @prisma/client",
+        "version": "^7.8.0",
+        "why": "ORM。Prisma 7 已发布,与 Hono 通过 c.var 注入 client 实例配合(中间件挂载)"
+      },
+      {
+        "name": "bun",
+        "version": "^1.3.14",
+        "why": "运行时 + 内置 Bun.serve / Bun.cron / bun:sqlite。无需 node-cron 等额外依赖"
+      },
+      {
+        "name": "node-cron",
+        "version": "^4.2.1",
+        "why": "备选:cron 表达式调度库。仅在需更复杂调度(如时区/重试策略)而 Bun.cron 不足时考虑;默认用内置 Bun.cron"
+      }
+    ],
+    "recommendedApproach": [
+      "【版本锁定】hono ^4.12.25、@hono/zod-validator ^0.8.0、zod ^4.4.3、@prisma/client ^7.8.0、bun ^1.3.14(均在 package.json 锁死)。注意:@hono/zod-validator 0.8.0 的 peerDep 同时接受 zod ^3.25.0 || ^4.0.0 且 hono >=4.10.0,而 @hono/zod-openapi 1.4.0 强制 zod ^4.0.0——所以全栈统一用 zod v4,不要混装 v3。",
+      "【项目结构 apps/backend】推荐: apps/backend/src/index.ts(入口,组合 app + Bun.serve + 信号处理) / app.ts(组装所有 app.route) / routes/(feed.ts/qbittorrent.ts/library.ts/config.ts/tasks.ts,每个导出一个 new Hono().get/post... 子 app) / middleware/(auth.ts/error.ts/logger.ts,用 createMiddleware 独立成文件) / lib/(prisma.ts 单例 client、qbittorrent.ts、scrapers/、ai.ts OpenAI 兼容封装、scheduler.ts 包装 Bun.cron + 内存任务队列) / schema/(zod 定义,前端也复用) / types.ts(导出 AppType、Env)。pnpm workspaces 让前端 import '@shikigami/backend' 的 type 路径指向 src/types.ts。",
+      "【路由组织 + RPC 类型】每个子路由文件 const app = new Hono().get(...) 链式定义并 export default app + export type = typeof app。根 app.ts 用 .route('/api/feed', feedApp) 等挂载,确保链式 .get() 的返回值参与 typeof 类型推断(Hono 的 RPC 类型依赖最后一条路由被赋值/导出)。注意:不要在 .route() 之后用 .get()——后挂载的路由不会进入类型。最佳实践是每个子 app 内部自洽(都在 .route 前定义完),根 app 只做组合。",
+      "【hono/client 前端集成】前端 import { hc } from 'hono/client'; import type { AppType } from '@shikigami/backend/src/types'; const api = hc<AppType>('/'); 之后 api.api.feed.$get({ query: {...} }) 即类型安全。因前端与后端同源(后端托管前端构建产物),baseUrl 用 '/' 即可,无需 CORS;若开发期前后端分端口(Vite 5173 -> backend 3000)则配 hono cors() 或 Vite proxy。",
+      "【中间件:认证】用 hono/factory 的 createMiddleware<{ Variables: { user: User; token: string } }> 定义 authMiddleware,内部校验 Authorization: Bearer xxx(可结合 @hono/zod-validator 或自实现)。c.set('user', user) 后,handler 用 c.var.user 类型安全读取。对 qBittorrent/配置/任务等敏感路由用 app.use('/api/...', authMiddleware) 挂载;公开 RSS/feed 可放行。若简单场景可用 hono 内置 bearerAuth({ token, verifyToken })。",
+      "【中间件:错误】import { HTTPException } from 'hono/http-exception'; 业务错误 throw new HTTPException(404, { message: '...'}); 全局 app.onError((err, c) => { if (err instanceof HTTPException) return err.getResponse(); console.error(err); return c.json({ error: 'Internal Server Error' }, 500); }); 再加 app.notFound((c) => c.json({ error: 'Not Found' }, 404)); 统一错误响应结构 { error: string, code?: string }。",
+      "【中间件:CORS】import { cors } from 'hono/cors'; app.use('/api/*', cors({ origin: ['http://localhost:5173'], credentials: true }));。生产同源托管可省略,仅开发期前后端分离时需要。",
+      "【长驻进程 + 优雅关闭】不要用 export default { port, fetch }(拿不到 server 实例做优雅关闭)。改用显式: const server = Bun.serve({ port: 3000, fetch: app.fetch, maxRequestBodySize: 1024*1024*200 }); 然后注册信号: process.on('SIGTERM', async () => { await gracefulShutdown(); await server.stop(); process.exit(0); }); process.on('SIGINT', ...); gracefulShutdown 内部:停 scheduler(取消 Bun.cron 任务、清空内存队列并等待 in-flight 任务完成)、关 prisma 连接(await prisma.$disconnect())、刷新日志。server.stop() 默认等待 in-flight 请求完成(不传参=优雅,传 true=强制)。",
+      "【进程内 cron + 内存任务队列】直接用 Bun 内置 Bun.cron('*/15 * * * *', async () => { await pollFeeds(); });(已确认 Bun 有原生 cron API,无需 node-cron)。内存任务队列:自建一个简单的 Promise 队列或用 p-queue,在 cron 回调里 enqueue 任务(抓 RSS→刮削→入库→触发 qBittorrent/Jellyfin)。注意:cron 回调里的异常要用 try/catch 包住,否则会 unhandledRejection;单进程重启会丢内存队列,关键状态必须落库(SQLite)。",
+      "【托管前端构建产物】import { serveStatic } from 'hono/bun'; app.use('/assets/*', serveStatic({ root: './public' })); app.get('*', serveStatic({ path: './public/index.html' })); 把 apps/web 的构建产物(vite build 输出)在部署时拷贝/软链到 apps/backend/public。注意 SPA history 模式需 catch-all 回退 index.html。也可用 Bun.serve 原生 routes,但用 Hono 的 serveStatic 更易在 app 层统一中间件(如注入版本头)。",
+      "【OpenAPI(可选)】两条路线择一:(A)轻量——用 @hono/zod-openapi 的 OpenAPIHono 替换 Hono,路由用 createRoute + app.openapi(route, handler) 注册,app.doc('/doc', {...}) 输出,再用 @scalar/hono-api-reference 挂载 UI;注意这会强制 zod v4 且路由写法变化。(B)最小侵入——继续用普通 Hono + @hono/zod-validator,用第三方 hono-openapi(rhinobase) 1.3.0 的 openAPIRouteHandler 自动从已注册路由+ zod schema 推导 OpenAPI。推荐先走 (B),等稳定后再决定是否迁移 (A)。OpenAPI 对动漫 BT 工具链是锦上添花,可后置。",
+      "【入口与开发命令】package.json scripts: dev: bun run --hot src/index.ts(--hot 支持热重载,Hono/Bun 都支持); start: bun run src/index.ts; build: bun build src/index.ts --target=bun --outdir dist。Dockerfile 用 oven/bun:1.3 基础镜像,CMD [\"bun\",\"run\",\"src/index.ts\"]。"
+    ],
+    "summary": "Hono 最新稳定版 4.12.25(2026-06-09 发布),Bun 运行时原生支持,Bun 当前 1.3.14。后端用「export default { port, fetch }」的 Bun 原生入口即可,Bun 自带 cron(Bun.cron)满足\"进程内 cron\"需求无需第三方库,优雅关闭用 server.stop()(返回 Promise,默认等待 in-flight 请求)。RPC 通过 hc<AppType>('/api') + 导出 typeof route 实现,前后端独立项目需在 monorepo 里用 workspace 包路径 import type。Zod 已是 v4(4.4.3),@hono/zod-validator 0.8.0 同时兼容 zod v3/v4,但 @hono/zod-openapi 1.4.0 强制 zod v4——因此全栈统一 zod v4。OpenAPI 可选,@hono/zod-openapi + @scalar/hono-api-reference 是主流方案。",
+    "topic": "Hono + Bun 后端架构(项目结构 / RPC / 中间件 / 进程生命周期 / 托管前端 / OpenAPI)"
+  },
+  "后台调度与任务队列": {
+    "apiOrDataPoints": [
+      {
+        "detail": "new Queue(fn, {concurrent, maxRetries, retryDelay, maxTimeout, id, precondition, store}) → 实例; 方法 q.push(task, cb) / q.pause() / q.resume() / q.destroy() / q.getStats(); 事件 task_finish/task_failed/empty/drain",
+        "name": "better-queue"
+      },
+      {
+        "detail": "Bun.cron(schedule, handler, opts?) 返回 CronJob(.stop/.unref); Bun.cron.parse(expr, rel?) 返回 Date|null; 进程内不持久化,天然 noOverlap",
+        "name": "Bun.cron"
+      },
+      {
+        "detail": "参数 username/password; 成功后 Set-Cookie: SID=... 供后续请求携带; 连续失败会 403(IP 封禁)",
+        "name": "qBittorrent: POST /api/v2/auth/login"
+      },
+      {
+        "detail": "filter 取 completed; 返回含 state,progress,added_on 的数组",
+        "name": "qBittorrent: GET /api/v2/torrents/info"
+      },
+      {
+        "detail": "multipart/form-data; urls(magnet/http) 或 torrents(原始二进制); 可带 category/tags/savepath/paused",
+        "name": "qBittorrent: POST /api/v2/torrents/add"
+      },
+      {
+        "detail": "可按 team_id(字幕组)/sort_id(分类)/keyword 过滤组合",
+        "name": "dmhy RSS"
+      },
+      {
+        "detail": "全量或按番剧 bangumi id 过滤",
+        "name": "mikan RSS"
+      },
+      {
+        "detail": "GET /api/v2/app/preferences; POST /api/v2/app/setPreferences(json=...)",
+        "name": "qBittorrent 偏好"
+      }
+    ],
+    "confidence": "high",
+    "gotchas": [
+      "Bun.cron 进程内任务完全不做持久化,进程崩溃/重启即丢失全部排队中任务。任务状态必须写 DB(一张 job 表带 status/payload/runs/next_run),重启时扫描 pending/running 并重新入队——这是「优雅关闭不丢任务」的核心。",
+      "Bun.cron 的内存 handler 解析 cron 为 UTC,无 DST;而 OS 级 Bun.cron(path,schedule,title) 用系统本地时区。混用会错位,统一设 TZ=Asia/Shanghai 容器环境变量最稳。",
+      "better-queue 的 sql store(可持久化到 SQLite/PG)理论可用,但它基于旧 callback 风格、依赖回调语义,与 Hono/Bun 的 async 习惯有摩擦。在已有 Prisma+SQLite 的项目里,更推荐内存队列 + Prisma 持久化任务表(更可控、可调试)。",
+      "qBittorrent Web API 没有 webhook 完成事件推送,只能轮询 /torrents/info。qB 自带 RSS 自动下载器(completion 后由 qB 处理),但刮削/重命名/Jellyfin 扫库这些后处理仍要你轮询 state==completed 来触发。",
+      "dmhy 有反爬,过密轮询(如每分钟)会被封 IP。已确认它会封「迅雷等离线下载」类客户端,正常 RSS 拉取建议 ≥15 分钟,并对 User-Agent 做标识。",
+      "幂等性必须用 torrent infohash(从磁力链/magnet 的 xt=urn:btih:<hash> 解析,或 qB 返回的 hash 字段)做唯一键,而不是文件名——同一资源可能由不同字幕组发布不同文件名。",
+      "重试退避要加抖动(jitter)与最大退避上限,否则多个失败任务同时重试会形成重试风暴(thundering herd),尤其对 dmhy/OPENAI 这种有速率的依赖。",
+      "AI 刮削任务调 OpenAI 兼容 API 时,把 base_url/key 做成可配(支持本地 Ollama),并复用 HTTP keep-alive 连接池;OpenAI 速率限制建议串行(concurrent:1~2)避免触发 429。",
+      "Hono 官方文档只演示 export default 模式,该模式拿不到 server 句柄无法 stop();优雅关闭必须改用 const server = Bun.serve({fetch: app.fetch}) 显式模式,文档未明说这点。",
+      "RSS 来源仅限公开 RSS/页面,不绕验证码、不做登录态爬取;nyaa.si/mikan 部分接口需注意 robots.txt 与站点 ToS,中文社区优先 dmhy。"
+    ],
+    "libraries": [
+      {
+        "name": "bun",
+        "version": ">=1.1.34 (Bun.cron 稳定版)",
+        "why": "原生 cron 提供者,无需第三方。CronJob.stop() 用于关闭;注意 parse 为 UTC"
+      },
+      {
+        "name": "better-queue",
+        "version": "^3.8.12",
+        "why": "concurrent/maxRetries/retryDelay/precondition/id 一站式覆盖队列需求。fallback 用 better-queue-memory 显式内存 store"
+      },
+      {
+        "name": "p-queue",
+        "version": "^8.x (ESM)",
+        "why": "更现代的纯 async 并发控制备选;注意 ESM-only,需 import 而非 require"
+      },
+      {
+        "name": "hono",
+        "version": "^4.x",
+        "why": "后端框架,与 Bun.serve 配合实现优雅关闭"
+      },
+      {
+        "name": "@prisma/client",
+        "version": "^5.x",
+        "why": "任务表去重/状态持久化(用 String 的 torrentHash/enclosureUrl 做唯一键)"
+      }
+    ],
+    "recommendedApproach": [
+      "Cron 方案:直接用 Bun.cron(schedule, handler, options?) 进程内调度,零依赖、与 Bun 运行时同源、天然 no-overlap(handler 返回的 Promise 未 settle 前不会触发下一次)。不要用 node-cron/cron 包。签名: const job = Bun.cron('*/15 * * * *', async () => { ... }); 可用 job.stop() 停止、job.unref() 不阻止进程退出。注意:进程内 cron 全部按 UTC 解释表达式(0 9 * * * = 09:00 UTC),容器固定 TZ=Asia/Shanghai 后表达式按本地写,或统一写 UTC。",
+      "任务队列: 用 better-queue ^3.8.12。构造: new Queue(async (task, cb) => {...}, { concurrent: 2, maxRetries: 5, retryDelay: (n) => Math.min(30000, 1000 * 2 ** n) /* 指数退避+抖动 */, id: 'taskId' /* 自动去重 */, precondition: (cb) => cb(null, isOnline) })。better-queue 的 id 选项天然做幂等:push 相同 id 的任务会被 filter/merge,可配合 merge 选项合并同 id 任务。队列纯内存(非持久),所以「幂等」必须靠业务层去重表(见下)。",
+      "幂等/去重(防重复下载): 在 Prisma 中建一张 DownloadItem 表,字段: infoHash(主键,来自磁力链的 xt=urn:btih:<HASH>)/enclosureUrl(String @unique)/source(dmhy|mikan)/status(pending|queued|downloading|completed|failed)。抓到 RSS 项后先 upsert,只有新增的才 push 到队列。infoHash 是最稳的去重键(同一资源多站点/多文件名也能识别)。下载前再查一次 qBittorrent GET /api/v2/torrents/info?hashes=<hash> 确认未存在。",
+      "RSS 轮询(cron): 用 Bun.cron('*/15 * * * *', fetchRss) 调度。轮询间隔建议 15 分钟(参考 *arr 默认),站点压力友好、符合 DMHY/mikan 更新频率。RSS 端点: dmhy=https://share.dmhy.org/topics/rss/rss.xml?keyword=...&sort_id=2&team_id=657; mikan=https://mikanani.me/RSS/Classic 或 https://mikanani.me/RSS/Search?searchstr=KEYWORD; bangumi.moe=https://bangumi.moe/rss/latest 或 https://bangumi.moe/rss/search/QUERY。用 fast-xml-parser 解析,User-Agent 设为友好标识。",
+      "qBittorrent 完成检测(轮询,非 webhook): 用另一个 Bun.cron('*/2 * * * *', pollQbittorrent)。流程: GET /api/v2/torrents/info?filter=completed&category=anime → 对 state 含 'UP' 或 progress==1 的条目,与 DownloadItem 表里 status!=completed 的比对 → 命中后触发刮削任务入队。qBittorrent 无 webhook/完成事件推送,只能轮询;2 分钟足够及时又不过载。注意登录: POST /api/v2/auth/login (form: username, password) 拿 SID cookie,后续请求带 Cookie: SID=...。",
+      "优雅关闭(不丢任务): 进程内方案的关键是把『待办状态』落库。设计: cron 触发时把任务写 Prisma 任务表(status=queued, payload=...) 再 push 内存队列;worker 取到任务先置 status=running,完成置 completed/failed。收到 SIGTERM/SIGINT 时: (1) queue.pause() 停止取新任务; (2) 等待 in-flight 完成(设上限 30s,Promise.race 超时则强制); (3) server.stop() 关 HTTP; (4) 把仍处于 running 的任务在 DB 里改回 queued,下次启动重新入队。",
+      "优雅关闭的具体代码模式: 不要用 Hono 默认的 export default app 模式(拿不到 server 句柄),改用 const server = Bun.serve({ port, fetch: app.fetch }); process.on('SIGTERM', async () => { await gracefulShutdown(server); }); ,gracefulShutdown 内按上条顺序处理,最后 process.exit(0)。注意 Bun.cron 返回的 job 可保存引用后 job.stop()。",
+      "重试/退避: better-queue 的 retryDelay 支持函数形式,用 retryDelay: (retried, err) => { const base = Math.min(30000, 1000 * 2 ** retried); return base + Math.random() * 1000; } 做指数退避+抖动(jitter)。区分错误类型: 4xx(非429)直接 maxRetries=0 不重试; 429/5xx/网络错才重试。AI 刮削任务对 OpenAI 速率限制敏感,建议单独的队列实例 concurrent:1。",
+      "并发控制: better-queue 按『资源类型』开多个队列实例: rssFetchQueue(concurrent:2, 防站点 ban)、aiScrapeQueue(concurrent:1~2, 看 OpenAI 速率)、qbittorrentQueue(concurrent:1, qB 操作串行避免竞态)。每队独立 maxRetries/retryDelay。precondition 选项可做『连接可用性检查』(qBittorrent 登录失败时不消费)。",
+      "调度编排建议: apps/backend/src/scheduler/ 目录组织: cron.ts(注册所有 Bun.cron)、queues.ts(导出各 better-queue 实例)、shutdown.ts(graceful shutdown 协调)、jobs/(各任务实现 rss.ts/qbittorrent.ts/scrape.ts)。Prisma schema 里 Task/DownloadItem 模型做持久化层。启动顺序: 启动时先 reconcileTaskTable()(扫描 status=queued/running 重新入队)再注册 cron。"
+    ],
+    "summary": "后台调度建议用「Bun.cron(进程内,轻量,UTC) + better-queue(任务队列,带重试/退避/并发/幂等去重) + Prisma 落库任务状态」的组合,纯进程内即可满足抓取/轮询/刮削/下载触发。Bun.cron 不持久化、崩溃即丢,所以关键任务状态必须写 SQLite,启动时 reconcile(重入队未完成任务)。优雅关闭用 Bun.serve() 直接拿 server 句柄,在 SIGTERM 里 await server.stop() 并 queue.pause()+等 drain。RSS 轮询间隔建议 15 分钟(参考 sonarr 默认),qBittorrent 完成检测用 30 秒~1 分钟轮询 GET /api/v2/torrents/info?filter=completed,因为没有原生 webhook 事件。幂等性靠 torrent infohash(磁力链里的 btih)或 enclosure URL 做唯一键去重,入库用 UNIQUE 约束。",
+    "topic": "动漫 BT 工具链 - 进程内后台调度与任务队列方案 (Hono + Bun)"
+  },
+  "AI 文件名识别刮削": {
+    "apiOrDataPoints": [],
+    "confidence": "high",
+    "gotchas": [
+      "Ollama OpenAI 兼容端点对 response_format json_schema(strict 结构化)支持不稳定/不保证:官方兼容矩阵只把 response_format 归入 'JSON mode',strict schema 走原生 /api/chat 的 format 参数更可靠。文档明确提示 Ollama Cloud 不支持结构化输出,必须本地或自托管。",
+      "Ollama 兼容端点不支持 tool_choice(强制必调工具),且支持 list 里 logprobs/n/user 缺失,用 openai SDK 时不要依赖这些。",
+      "Ollama 上下文窗口 OpenAI API 无法直接设置,需用 Modelfile 的 PARAMETER num_ctx 并 ollama create 新模型——本地小模型 num_ctx 默认常只有 2k/4k,放 few-shot + 长字幕组列表容易超长,务必调大。",
+      "严格模式 schema 限制:additionalProperties 必须为 false,所有字段必填(用 null 兜底),不支持任意 oneOf 嵌套(根对象必须是 object),引用 $ref 在根级受限——季/集数组结构需提前展平设计。",
+      "Prompt caching 要求精确前缀匹配:识别失败时往 messages 里追加用户反馈会破坏前缀。修正流程应单独构造一次新请求(或把反馈拼到末尾再重发),避免污染可缓存前缀。",
+      "OpenAI 第三方兼容服务(非官方)很多不实现 prompt caching 与 json_schema strict,成本/质量可能显著劣化,接入时需逐项验证;temperature 极低会牺牲小模型创造力但对抽取任务通常更稳。",
+      "绝对集数映射高度依赖外部数据源(anidb/anilist/TMDB)而非纯文件名:纯靠 AI 猜映射易错季。必须允许人工确认并持久化「该番剧绝对集→季集」映射表,不要每次重算。",
+      "字幕组(fansub)标签混乱、罗马音中英混合、剧场版/Webrip/合并集/OVA 会让识别置信度骤降;务必输出 confidence 与不确定字段,低置信度一律进人工队列而非自动重命名。",
+      "抓取 dmhy/mikan/bangumi.moe/nyaa 仅限公开 RSS/页面,不绕验证码、不爬私有;文件名识别本身只用本地/用户上传的文件名字符串,不涉及对外抓取,合规风险低,但重命名后的元数据来源需注意各站点 ToS。"
+    ],
+    "libraries": [
+      {
+        "name": "openai",
+        "version": "6.42.0",
+        "why": "官方 Node/TS SDK,支持自定义 baseURL 连 Ollama/任意兼容服务,支持 response_format json_schema strict、tools、prompt_cache_key;TS 类型完备可与 Hono 共享"
+      },
+      {
+        "name": "zod",
+        "version": "^3.25",
+        "why": "定义 AnimeMeta schema 单一真相源,运行期校验模型返回,失败即人工确认;通过 zod-to-json-schema 转 JSON Schema"
+      },
+      {
+        "name": "zod-to-json-schema",
+        "version": "3.25.2",
+        "why": "把 Zod schema 转成 response_format 需要的 JSON Schema;注意 strict 模式需 additionalProperties:false,该库可配置"
+      },
+      {
+        "name": "@hono/zod-validator",
+        "version": "latest",
+        "why": "Hono 中间件复用同一 Zod schema 校验 web→backend RPC 入参,保证字段定义一致"
+      }
+    ],
+    "recommendedApproach": [
+      "【首选方案】用 openai 官方 SDK(6.42.0)走 Chat Completions: `POST {base_url}/v1/chat/completions`，字段 response_format={type:'json_schema', json_schema:{name, strict:true, schema}}。strict:true 保证 100% schema 遵循，优于 json_object(JSON mode，只保证合法 JSON 不保证结构)。当目标后端不支持 json_schema（多数本地/国产网关）时降级为 response_format={type:'json_object'} + 在 prompt 里粘贴 schema 说明，并用 Zod 校验/重试。",
+      "【统一抽象】不要直接 new OpenAI() 散落各处。在 apps/backend 封装 src/llm/client.ts：构造 new OpenAI({ baseURL: env.LLM_BASE_URL, apiKey: env.LLM_API_KEY })。所有调用走该单例。支持三种形态：(a) OpenAI 官方(支持 strict json_schema)；(b) Ollama 本地(baseURL=http://host:11434/v1, apiKey 任意)；(c) 任意 OpenAI 兼容网关。用 env.LLM_PROVIDER 探测能力后决定用 json_schema 还是 json_object。",
+      "【OpenAI 兼容网关能力探测】启动时先打一次 OPTIONS：发一个最小 json_schema 请求，若返回 400/不支持则自动降级 json_object。Ollama 走 OpenAI 端点时 json_schema 不保证稳定，建议对 Ollama 直连时优先用其原生 /api/chat 的 format 参数（即不走 /v1，改用 ollama npm 包或直接 fetch），把同一份 schema 作为 format 传入。",
+      "【Tool calling 决策】本场景不建议用 function/tool calling 来产出刮削结果。Tool calling 是「模型决定调用哪个外部函数」，结构化输出是「模型直接返回结构化数据」——刮削是后者。OpenAI 官方文档明确：response_format 用于结构化输出，tools 用于连接外部能力。工具调用只会徒增一次往返与 token 开销。仅在需要模型主动触发「入库新条目」「写映射表」等副作用时才用 tools，且要兼容 Ollama(它支持 tools 但不支持 tool_choice)。",
+      "【Schema 设计(关键字段，全部 required + additionalProperties:false 以满足 strict)】{release_group(字幕组, string|null), title_cn(中文标题), title_ro(罗马音), title_en(英文|null), season(number, 1-based), episode(number, 当季集), absolute_episode(number|null, 绝对集, 长番用), episode_type(enum: normal/special/ova/movie/web), resolution(enum: 360p..2160p/4K 或 string), source(string|null: BDRip/Web-DL/HDTV), video_codec(string|null: x264/x265/AV1), audio_codec(string|null), checksum(string|null: CRC32), release_date(string|null), confidence(number 0-1), needs_review(boolean), raw_tokens(保留原始片段便于人工核对)}。nullable 字段用 {type:['string','null']}。",
+      "【Prompt 结构(为命中缓存，静态在前、变量在后)】messages=[ {role:'system', content: 角色设定+输出规范+字幕组常识+季/绝对集映射规则}, {role:'system', content: JSON Schema 的字符串说明(同时作为缓存前缀和兜底引导)}, {role:'user', content:'<few-shot 示例 5-8 条，覆盖: 季番、分割 cours(S2)、长番绝对集、OVA/剧场、繁简中文、罗马音>}, {role:'user', content:'filename: '+实际文件名} ]。务必把 system+schema+few-shot 固定在最前且字节级稳定，实际文件名放最后。",
+      "【季与绝对集数映射(核心痛点)处理】不要让 AI 纯靠猜。三层策略：1) 先用确定性规则/正则提取括号里的数字与常见标记(S2/第二季/II/Ⅱ/2024)；2) 命中已知 Bangumi/TMDB/anidb 条目时，用其官方集数映射表(本地 SQLite 缓存)把 absolute_episode 换算成 season/episode——例如某番 absolute 26-50=第二季；3) 仅当规则与缓存都失败时才让 AI 给出 best-guess 的 season/episode 并强制 needs_review=true。Prompt 中明确告知：「absolute_episode 是字幕组文件名里的连续编号；season/episode 是按播出季拆分的；二者不一定相等，不确定时 season/episode 填 null 并设 needs_review」。",
+      "【中文/罗马音/英文标题】prompt 要求模型同时输出三个标题字段，并标注「title_cn 为简体中文官方译名；title_ro 为 Hepburn 罗马音(去除空格连字符)；无法确定时填 null」。可引入一个轻量同义词表(Bangumi subject 别名)作为 few-shot 之外的硬性提示注入到 system，提升冷门番识别率，但这部分要可缓存(固定文本)。",
+      "【成本与缓存控制】1) 启用 prompt caching(OpenAI 官方自动生效，≥1024 token 的稳定前缀最高省 90% 输入费)；可用 prompt_cache_key 让同类型请求路由到同一缓存。2) 文件名刮削用便宜模型(如 gpt-4o-mini 级别 / 本地 7B-8B 量级如 qwen3:8b、gpt-oss)足够，无需推理模型。3) 设 max_tokens 限制(如 512)防止跑飞。4) 同一文件名做内容 hash 缓存到 SQLite，二次入库直接命中不调 LLM。5) 批量入库时优先复用同一 system/few-shot 前缀以最大化缓存命中。",
+      "【识别失败与人工确认】AI 输出含 confidence 与 needs_review。后端规则：confidence<0.7 或 needs_review=true 或 schema 校验失败(重试 1 次后仍失败)→ 写入 pending_review 队列(Prisma 表 PendingScrape)，前端 web 提供「待确认」列表，用户可手动修正字段，修正结果回写为人工标注样本，定期回流进 few-shot 池持续提升准确率。绝对禁止低置信度直接自动重命名(会污染 Jellyfin/Emby 库)。",
+      "【本地 Ollama 兼容注意点】1) OpenAI 端点不支持 tool_choice，逻辑里不要依赖强制工具调用；2) Ollama Cloud 不支持结构化输出，必须本地 ollama serve 或自托管；3) 推荐模型 qwen3:8b / qwen2.5:7b / gpt-oss(支持工具与结构化输出)；4) 设 temperature:0(Ollama 用 options:{temperature:0})提升确定性；5) Ollama 的 OpenAI 端点对 response_format 的 json_schema 支持不完整，本地直连优先用其原生 /api/chat + format:{...schema};6) 上下文窗口 num_ctx 默认偏小，带 few-shot 时需通过 Modelfile 调大 num_ctx(如 8192)。"
+    ],
+    "summary": "用 OpenAI 兼容 API(官方或本地 Ollama/任意网关)对混乱的动漫发布文件名做结构化刮削,推荐用官方 openai SDK(v6.42.0)+ response_format 的 json_schema(strict) 模式做强制 schema 输出,而非 function/tool calling(tool calling 是为\"模型决定调哪个外部函数\"设计的,刮削场景用结构化输出更直接、更省 token)。Prompt 中必须显式处理中文动漫三个核心痛点:字幕组(fansub)标签、季(S)/集(E)/绝对集数(absolute)映射、中文标题/罗马音/英文标题三态。成本控制靠 OpenAI 自动 prompt caching(静态 system message + schema 放最前,≥1024 token,最高省 90% 输入成本),并按文件名 hash 做本地结果缓存避免重复调用。识别失败(置信度低/schema 校验不过)落库为\"待人工确认\"队列,绝不自动重命名。本地 Ollama 兼容性需注意:其 OpenAI 端点支持 JSON mode 与 tools,但 tool_choice 不支持;结构化输出严格模式应走原生 format 参数。",
+    "topic": "AI 文件名识别刮削 (动漫 BT 工具链 - OpenAI 兼容 API 结构化识别)"
+  },
+  "前端 Vite+React 架构": {
+    "apiOrDataPoints": [
+      {
+        "detail": "服务端导出类型供前端 hc<AppType> 消费,需 strict:true + project references",
+        "name": "export type AppType = typeof app"
+      },
+      {
+        "detail": "import { hc } from 'hono/client'; 实例化类型安全客户端",
+        "name": "hc<AppType>(baseUrl)"
+      },
+      {
+        "detail": "monorepo 性能优化:后端编译时预实例化类型,前端导入避免 IDE 卡死。代码见总结",
+        "name": "hcWithType 自写助手"
+      },
+      {
+        "detail": "import { serveStatic } from 'hono/bun'; app.use('/assets/*', serveStatic({root:'./dist',precompressed:true}))",
+        "name": "后端托管前端产物"
+      },
+      {
+        "detail": "app.get('*', serveStatic({ path: './dist/index.html' })) 托管前端 SPA",
+        "name": "SPA fallback"
+      },
+      {
+        "detail": "tanstackRouter({target:'react',autoCodeSplitting:true}) 必须在 react() 之前",
+        "name": "TanStack Router Vite 插件"
+      },
+      {
+        "detail": "createRouter({routeTree, context:{queryClient}}); loader 中 context.queryClient.ensureQueryData 预取",
+        "name": "Router + Query 集成"
+      },
+      {
+        "detail": "npx shadcn@latest init -t vite --monorepo(在 apps/web 内执行)",
+        "name": "shadcn 初始化"
+      },
+      {
+        "detail": "routegen/: GET 主页; routegen/rule: GET POST; routegen/rule/:id GET PUT DELETE; tasks: GET POST; task/:id: GET DELETE; schedule/:id/run POST; library POST GET; library/:id/metadata GET; qb/status GET; qb/connect POST; ai/preview POST; settings GET PUT",
+        "name": "建议的后端 API 路由(对应五页面)"
+      },
+      {
+        "detail": "GET /api/subscriptions 与客户端 /subscriptions 两条路由并存,前者 app.route('/api', apiApp) 挂载,后者 serveStatic 托管 index.html",
+        "name": "API 前缀避免与前端路由冲突"
+      }
+    ],
+    "confidence": "high",
+    "gotchas": [
+      "Hono RPC 在 monorepo 必须满足三项,缺一会出现 'Type instantiation is excessively deep and possibly infinite':(1) 后端与前端 tsconfig 均设 strict:true;(2) 启用 TS project references(composite:true)且 apps/web 引用后端包;(3) 后端与前端两个包的 hono 版本必须完全一致(锁同版本,勿用 ^ 跨大版本)。否则 IDE 卡死或类型推断失败。",
+      "必须用 hcWithType 自写助手 + 后端先 tsc 编译:直接在 apps/web 里 import type { AppType } 在中大型 API 上会让 tsserver 每次重复实例化巨型类型导致卡顿。正确做法是后端导出 export type Client = ReturnType<typeof hc<typeof app>> 与 hcWithType 函数,前端导入编译产物。参考 hono-rpc-perf-tips-example。",
+      "后端同时托管 /api/* API 与前端 SPA 时,API 路由必须统一前缀(如 /api),且 app.get('*', serveStatic index.html) 必须放在所有 API 路由注册之后,否则会拦截 API 请求。",
+      "TanStack Router Vite 插件必须排在 @vitejs/plugin-react 之前,否则路由代码生成可能失效。routeTree.gen.ts 是生成文件,勿手改,加入 .gitignore 或提交均可(团队约定)。",
+      "Vite 8.x 较新,部分插件(尤其小众)可能尚未适配。核心三件套(@vitejs/plugin-react 6.x、@tailwindcss/vite 4.x、@tanstack/router-plugin 1.x)已确认兼容,但若引入额外 Vite 插件需逐一验证。保守起见可锁定 Vite 7.x LTS(若团队求稳)。",
+      "shadcn/ui 在 monorepo 中:components.json 放 apps/web 根,init 用 --monorepo 标志;@/ 别名必须在 apps/web/vite.config.ts 和 tsconfig.json 双处配置(path.resolve + paths),否则组件导入失败。Tailwind v4 不再用 tailwind.config.js,改用 CSS 内 @theme 配置 + @tailwindcss/vite 插件,从 v3 迁移需注意。",
+      "Hono serveStatic 的 root 是相对进程 cwd 的路径,Docker 部署时需确保 WORKDIR 与 dist 路径一致;precompressed:true 需要 Vite 构建时生成 .br/.gz(vite-plugin-compression 或 compression)才能生效。",
+      "Prisma 在 monorepo 中 schema 通常放 apps/backend/prisma/schema.prisma,生成的 client 默认在 node_modules;若要跨包共享需配置 output 输出到独立位置并通过包入口导出。前端不应直接依赖 Prisma(它是服务端专属)。",
+      "dmhy/mikan/bangumi.moe/nyaa.si 等抓取站点的反爬与法律合规:只做公开 RSS/页面、不绕过验证码、不存储版权 torrent 文件本体(仅存磁力链接/元数据),各站 RSS 端点结构不同且可能变更,前端不直接调用这些站点(统一由后端代理与解析)。",
+      "TanStack Query v5 的 mutation 不再有 onMutate 的隐式 context,乐观更新需显式返回 context;React 19 的 use() 与 Suspense 与 Query 的 useSuspenseQuery 可结合,但路由级 Suspense 边界要规划好,避免整页白屏。"
+    ],
+    "libraries": [
+      {
+        "name": "vite",
+        "version": "8.0.16",
+        "why": "前端构建器(也可保守锁 7.x LTS)。配合 @vitejs/plugin-react 6.0.2、@tailwindcss/vite 4.3.1、@tanstack/router-plugin/vite 1.168.18 三个插件"
+      },
+      {
+        "name": "react / react-dom",
+        "version": "19.x",
+        "why": "shadcn/ui 已全面支持 React 19;与 TanStack Query v5、TanStack Router v1 兼容"
+      },
+      {
+        "name": "hono",
+        "version": "4.12.25",
+        "why": "后端框架,前后端必须版本完全一致以避免 RPC 类型深层实例化错误"
+      },
+      {
+        "name": "@tanstack/react-query",
+        "version": "5.101.0",
+        "why": "服务端状态获取/缓存/失效;配套 @tanstack/react-query-devtools 5.101.0 用于开发调试"
+      },
+      {
+        "name": "@tanstack/react-router",
+        "version": "1.170.15",
+        "why": "类型安全文件式路由,与 Query 深度集成。若团队偏好成熟度可选 react-router 7.17.0(dom 已并入主包)"
+      },
+      {
+        "name": "tailwindcss / @tailwindcss/vite",
+        "version": "4.3.1",
+        "why": "v4 用 Vite 插件接入,CSS-first 配置;shadcn/ui 已原生支持"
+      },
+      {
+        "name": "shadcn/ui",
+        "version": "shadcn@2.9.0(CLI)",
+        "why": "通过 npx shadcn@latest init -t vite --monorepo 接入,组件源码直接拷入 apps/web/src/components/ui"
+      },
+      {
+        "name": "prisma / @prisma/client",
+        "version": "7.8.0",
+        "why": "ORM。schema 放 apps/backend,PrismaClient 实例由后端注入,前端通过 RPC 间接访问"
+      },
+      {
+        "name": "@tanstack/router-plugin",
+        "version": "1.168.18",
+        "why": "Vite 插件,生成 routeTree.gen.ts 并做自动代码分割,必须在 @vitejs/plugin-react 之前注册"
+      }
+    ],
+    "recommendedApproach": [
+      "【仓库布局】采用 pnpm workspaces,结构: apps/backend(源码 src/index.ts、src/routes/*、prisma/schema.prisma), apps/web(源码 src/main.tsx、src/routes/* 文件式路由、src/components/ui 为 shadcn 组件、src/lib/api.ts 为 hono client), 根目录 pnpm-workspace.yaml 内容 packages: - 'apps/*' 并用 catalog 统一 hono 版本, packages 共享包可选(如 packages/shared 存放 zod schema 双端复用), 根 turbo.json 编排 build(先 backend tsc 生成类型, 再 web vite build)。",
+      "【版本锁定 - npm registry 实测 2026/06】hono@4.12.25(两端必须完全同版本), @tanstack/react-query@5.101.0 + @tanstack/react-query-devtools@5.101.0, @tanstack/react-router@1.170.15, vite@8.0.16 + @vitejs/plugin-react@6.0.2, tailwindcss@4.3.1 + @tailwindcss/vite@4.3.1, prisma@7.8.0 + @prisma/client@7.8.0, @tanstack/router-plugin@1.168.18。React 19.x 配合 @types/react 19。",
+      "【hono/client RPC 接入 - 三步】(1) 后端: const app = new Hono().route(...) 链式定义,在 apps/backend/src/app.ts 导出 export type AppType = typeof app;(2) 因是 monorepo 必须用 hcWithType 规避深层类型: 在后端写 apps/backend/src/client.ts 内容 import { app } from './app'; import { hc } from 'hono/client'; export type Client = ReturnType<typeof hc<typeof app>>; export const hcWithType = (...args: Parameters<typeof hc>): Client => hc<typeof app>(...args); 然后后端 tsc 编译;(3) 前端 apps/web/src/lib/api.ts: import { hcWithType } from 'backend'; export const api = hcWithType(() => '/', { fetch: (input, init) => fetch('/api' + new URL(input).pathname + new URL(input).search, init) })。简化做法: api 通过 vite proxy 转发到后端,client 直接 hcWithType('/api')。",
+      "【tsconfig 强制要求 - RPC 类型生效的前提】apps/backend/tsconfig.json 与 apps/web/tsconfig.json 均必须 compilerOptions.strict=true;启用 project references: 根 tsconfig.json 设 references 指向两个子项目,子项目 composite=true;apps/web/tsconfig.json 中 references 指向 backend;两端 hono 版本用 pnpm catalog 锁成同一个精确版本号。缺任一条件会出现 'Type instantiation is excessively deep and possibly infinite'。",
+      "【TanStack Query 接入】apps/web/src/lib/query.ts: import { QueryClient } from '@tanstack/react-query'; export const makeQueryClient = () => new QueryClient({ defaultOptions: { queries: { staleTime: 30_000, refetchOnWindowFocus: false } } });。main.tsx 中 const [queryClient] = useState(makeQueryClient),用 <QueryClientProvider client={queryClient}> 包裹。封装 hooks 如 useSubscriptions = () => useQuery({ queryKey:['subscriptions'], queryFn: () => api.subscriptions.$get().then(r => r.json()) })。devtools 用 <ReactQueryDevtools initialIsOpen={false} /> 仅 dev 引入。",
+      "【TanStack Router 接入(推荐)】apps/web/vite.config.ts: plugins 数组中 tanstackRouter({ target:'react', autoCodeSplitting:true }) 必须排在 @vitejs/plugin-react() 之前。文件式路由: apps/web/src/routes/__root.tsx(layout+侧栏), routes/index.tsx(仪表盘), routes/subscriptions/index.tsx + routes/subscriptions/$id.tsx(订阅列表+详情), routes/tasks/index.tsx(下载任务), routes/library/index.tsx + routes/library/$id.tsx(媒体库), routes/settings/index.tsx(设置)。router.tsx: createRouter({ routeTree, context:{ queryClient }, defaultPreload:'intent' }),并通过 declare module '@tanstack/react-router' { interface Register { router: typeof router } } 注册类型。loader 中用 context.queryClient.ensureQueryData 预取避免瀑布。",
+      "【react-router 替代方案(若团队求稳)】react-router@7.17.0(react-router-dom 已并入主包,从 'react-router' 与 'react-router/dom' 导入)。用 createBrowserRouter + RouterProvider,数据加载用 loader/action 或结合 TanStack Query。优点:生态成熟、文档多;缺点:无 TanStack Router 的 search-param 类型推导和与 Query 的 context 原生集成。本项目纯 SPA,两者都够用,TanStack Router 类型体验更佳。",
+      "【shadcn/ui + Tailwind v4 接入】在 apps/web 执行 npx shadcn@latest init -t vite --monorepo(注意 --monorepo 标志);生成 components.json(style:'new-york', tailwind.css 指向 src/index.css, aliases 指向 @/components 等)。apps/web/vite.config.ts 加 resolve.alias 的 '@' -> path.resolve(__dirname,'./src')。安装组件: npx shadcn@latest add button card dialog table form dropdown-menu sonner tabs badge command。Tailwind v4 用 @tailwindcss/vite 插件而非 postcss,src/index.css 顶部 @import 'tailwindcss'; 配合 @theme 定义主题色。",
+      "【后端托管前端产物 - 生产部署】apps/backend/src/index.ts: import { serveStatic } from 'hono/bun'; 先 app.route('/api', apiApp) 挂载所有 API; 然后 app.use('/assets/*', serveStatic({ root:'./dist', precompressed:true, onFound:(_p,c)=>c.header('Cache-Control','public, immutable, max-age=31536000') })); 最后 app.get('*', serveStatic({ path:'./dist/index.html' })) 做 SPA fallback。Docker 构建阶段: 多阶段 Dockerfile, stage1 pnpm --filter web build 产出 apps/web/dist, stage2 复制到后端镜像的 ./dist 目录,Bun 运行后端。开发期: apps/web 用 vite dev server + vite.config.ts 的 server.proxy 把 /api 转发到 localhost:3000(后端端口)。",
+      "【页面结构建议】侧边栏导航对应五大模块: 订阅管理(/subscriptions: 新建订阅表单含 fansub/分辨率/关键词、订阅列表、匹配规则预览)、下载任务(/tasks: qBittorrent 任务表格、状态/进度、添加/暂停/删除、按状态过滤 tab)、媒体库(/library: 已刮削剧集网格、季/集结构、绝对集数映射展示、手动重刮按钮)、设置(/settings: 站点账号、AI base_url+key、qBittorrent 连接、Jellyfin/Emby 地址+API key、cron 表达式)。仪表盘(/)展示今日更新、活跃任务数、磁盘占用。"
+    ],
+    "summary": "基于 Vite 8 + React 19 + Tailwind v4 + shadcn/ui 构建 apps/web,通过 pnpm workspaces 与 apps/backend 并存。后端导出 AppType 供前端 hono/client 的 hc<AppType> 做端到端类型安全 RPC。数据层用 TanStack Query v5 管理服务端状态,路由用 TanStack Router v1(纯 SPA 客户端模式,无需 SSR/TanStack Start)。生产环境由后端 Hono 用 hono/bun 的 serveStatic 托管前端 dist 产物并做 SPA fallback。核心坑:Hono RPC 在 monorepo 中必须严格配置(strict:true + 项目引用 + 版本对齐 + hcWithType 预编译),否则会触发 \"Type instantiation is excessively deep\" 导致 IDE 卡死。",
+    "topic": "前端 Vite + React 架构与 monorepo 组织(动漫 BT 工具链)"
+  },
+  "动漫 BT 站抓取": {
+    "apiOrDataPoints": [
+      {
+        "detail": "全局最新 RSS，item 内 enclosure.url 直接是 magnet:?xt=urn:btih:... 多 tracker，author=字幕组，category 含分类名+sort_id。",
+        "name": "dmhy 全站 RSS"
+      },
+      {
+        "detail": "動畫分类专用 RSS（已验证有效），仅返回動畫类条目。",
+        "name": "dmhy 分类 RSS"
+      },
+      {
+        "detail": "按字幕组订阅（team_id 数字），用于按字幕组精确定阅。team_id 需从站内字幕组页面解析获得。",
+        "name": "dmhy 字幕组 RSS"
+      },
+      {
+        "detail": "关键词搜索 RSS（已验证有效，配合 ?keyword=）。注意抓取时 keyword 需 URL 编码。",
+        "name": "dmhy 关键词 RSS"
+      },
+      {
+        "detail": "列表式最新 RSS，item.enclosure.url = /Download/{date}/{hash}.torrent（仅 torrent 文件，无 magnet）；item.torrent 命名空间含 contentLength/pubDate。",
+        "name": "mikan 列表 RSS"
+      },
+      {
+        "detail": "按番组（季度）订阅 RSS（已验证有效），适合按番订阅。需先用 mikan 页面/解析拿到 bangumiId。",
+        "name": "mikan 单番订阅 RSS"
+      },
+      {
+        "detail": "按字幕组 RSS，team_id 从 mikan 站点解析。",
+        "name": "mikan 字幕组 RSS"
+      },
+      {
+        "detail": "最新 RSS，item.enclosure.url = /download/torrent/{id}/{filename}.torrent（仅 torrent 文件），link=详情页。tag/团队信息需从详情页或 HTML 解析。",
+        "name": "bangumi.moe 最新 RSS"
+      },
+      {
+        "detail": "搜索 RSS（已验证有效），q=关键词, c=分类如1_2, f=过滤(0/1/2), s=排序, o=asc/desc。item 自带 nyaa:infoHash 可直拼 magnet，link=download/{id}.torrent。",
+        "name": "nyaa.si 搜索 RSS"
+      },
+      {
+        "detail": "核心痛点。参考命名 [字幕组] 标题 - 集数 [来源][分辨率][编码]。注意：(a) 绝对集数（S1E13 起=第二季E1）需结合 anilist/bgmlist 的 mapping 表换算；(b) 中文番名常带空格/全角字符需规范化；(c) vol.xx = 卷号而非集数；(d) SP/OVA/ specials 需单独识别不并入正片集数。建议用 anitomy-js 解析结构化字段 + fallback 自写正则 + AI 刮削兜底。",
+        "name": "集数/绝对集数/字幕组命名正则"
+      }
+    ],
+    "confidence": "high",
+    "gotchas": [
+      "dmhy 域名建议用 https://share.dmhy.org（注意是 share. 子域，www.dmhy.org 是主站论坛）。HTTP 自动 301 到 HTTPS。",
+      "dmhy 按 sort_id（分类）过滤，与 team_id（字幕组）过滤是两个独立维度；可叠加但 URL 不是简单拼接，建议优先用 ?keyword= 通用搜索 RSS。team_id/team_id 数字需从站内页面解析获得，无公开 team 目录接口。",
+      "dmhy 的 RSS 分类过滤确切可用 URL 是 /topics/list/sort_id/2/rss.xml（已实测），不是文档里常见的 /topics/rss/sortID/2。两种说法都见于社区，以实测为准。",
+      "mikan 域名有 mikanani.me 和 mikanime.tv 等镜像/备用域，部分时间 mikanani.me 在国内被墙；RSS 形式一致。仅提供 .torrent 文件下载链接，需服务端解析 .torrent 提取 infohash 拼 magnet（webtorrent 库），或直接把 .torrent 给 qBittorrent。",
+      "nyaa.si 与 bangumi.moe 的 .torrent 下载链接（/download/...）经 Cloudflare，高频抓取易 403/1015；但 RSS（?page=rss / /rss/latest）端点对程序友好，限制宽松。务必 RSS 优先，HTML 兜底。",
+      "bangumi.moe 的 JSON API（/api/...）端点在本次研究中未验证到稳定可用入口（多个候选路径 404），不要依赖其 JSON API，统一走 RSS。其 tag/字幕组 信息在 RSS item 中缺失，需抓详情页或 HTML。",
+      "所有站点都有限流：建议每站轮询间隔 >=15-30 分钟（追番场景天然低频），加 jitter；加全局 rate limiter + 指数退避；缓存 RSS 内容（按 guid 去重）。dmhy 频繁请求易触发临时 IP 封禁。",
+      "字幕组名与番名提取极易错：绝对集数（10-13 常为第二季 1-4 集）需配 anilist/AniDB mapping；中文番名空格、全角字符、括号嵌套、Vol./SP/OVA 干扰集数正则——建议用 anitomy-js + 自写中文 fallback 正则 + AI 兜底三段式。",
+      "法律合规：只抓取公开 RSS/页面，不绕过登录墙/验证码/Cloudflare JS challenge（cloudscraper 类绕过在合规上属灰色，不建议使用）；不缓存/分发种子文件本体，仅转 magnet/torrent 链接给用户自己的 qBittorrent；遵守各站 robots.txt。",
+      "RSS 字段差异大：dmhy=magnet(enclosure), mikan=.torrent(enclosure)+torrent扩展节点, bangumi.moe=.torrent(enclosure), nyaa.si=.torrent(link, 无enclosure, 自带infoHash)。解析器需按站适配，统一归一化为 {title, magnet, torrentUrl, infoHash, size, pubDate, fansub, episode} 内部模型。"
+    ],
+    "libraries": [
+      {
+        "name": "fast-xml-parser",
+        "version": "^4.5.x",
+        "why": "纯 JS、无 native 依赖、Bun 友好，解析各站 RSS。用 ignoreAttributes:false 读 enclosure.@_url 和 nyaa:infoHash，用 isArray 把 rss.channel.item 强制成数组。"
+      },
+      {
+        "name": "Bun 内置 fetch (globalThis.fetch)",
+        "version": "Bun >=1.1",
+        "why": "原生支持 fetch，无需 axios/node-fetch。配 keepAlive + 重试 + UA 头即可。"
+      },
+      {
+        "name": "anitomy-js",
+        "version": "^3.x",
+        "why": "anime 文件名解析（fansub/title/episode/resolution/source）。port 自 C++ anitomy，需 native 编译，Docker 内构建。若想避免 native 可改用纯 JS 自写正则。"
+      },
+      {
+        "name": "@ctrl/qbittorrent",
+        "version": "^4.x 或 ^5.x",
+        "why": "qBittorrent Web API 封装，抓到 magnet/torrent 后直送下载器。"
+      },
+      {
+        "name": "webtorrent",
+        "version": "^2.x",
+        "why": "解析 mikan/bangumi/nyaa 返回的 .torrent 文件，提取 infoHash 以拼接 magnet 链接并统一内部模型。可选。"
+      },
+      {
+        "name": "p-limit / 简单令牌桶",
+        "version": "p-limit ^6.x",
+        "why": "进程内限流各站并发与频率，避免触发反爬/封禁。"
+      }
+    ],
+    "recommendedApproach": [
+      "统一抽象: 为每个站点实现一个 SiteAdapter 接口 {fetchLatest(): Promise<Torrent[]>, fetchByKeyword(kw): Promise<Torrent[]>, fetchByTeam(teamId): Promise<Torrent[]>}，内部统一走 RSS（XML）。返回归一化的内部 Torrent 类型 {source, title, magnet?, torrentFileUrl?, infoHash?, size?, pubDate, fansub, rawItem}。",
+      "dmhy 适配器（主力）: GET https://share.dmhy.org/topics/list/sort_id/2/rss.xml（分类動畫），或带关键词 https://share.dmhy.org/topics/rss/rss.xml?keyword=ENCODED，或字幕组 https://share.dmhy.org/topics/rss/team_id/{team_id}/rss.xml。enclosure.url 直接是 magnet（无需二次请求），author 是字幕组名。这是最省事的源。",
+      "mikan 适配器: GET https://mikanani.me/RSS/Classic（列表）或 https://mikanani.me/RSS/Bangumi?bangumiId={id}（按番）。RSS 仅给 .torrent 链接（无 magnet）。要 magnet 有两条路: (a) 下载 .torrent 文件后用 webtorrent 包解析出 infoHash 再拼 magnet:?(b) 抓详情页 HTML 拿 magnet（注意 Cloudflare）。推荐用 @ctrl/qbittorrent 时直接喂 .torrent URL 即可，不强制 magnet。",
+      "nyaa.si 适配器: GET https://nyaa.si/?page=rss&q={q}&c={category}&f={filter}&s={sort}&o={order}。分类用 1_0(全部动漫)/1_2(英文翻译)/1_3(非英文/含中文)/1_4(生肉)。注意 nyaa 的 item 没有 enclosure，下载链接在 <link>，且 nyaa:infoHash 直接可拼 magnet:?xt=urn:btih:{infoHash}。优先 RSS；HTML/JSON 接口可能被 Cloudflare 挡（2025 年间 403 较常见）。",
+      "bangumi.moe 适配器: GET https://bangumi.moe/rss/latest（全站）或 https://bangumi.moe/rss/{tag_id}（按标签/字幕组，tag_id 需先抓 https://bangumi.moe/api/v2/common/search-team?name= 拿到，JSON）。item.enclosure 是 .torrent 文件链接，无 magnet，需同 mikan 方案处理。",
+      "HTTP 客户端与反爬: Hono/Bun 侧用原生 fetch + keepalive，务必带真实浏览器 UA（如 Mozilla/5.0...Chrome/...）。进程内调度器对每个站点设独立令牌桶: dmhy/mikan 建议 >=10 分钟一次轮询、并发 1；nyaa/bangumi 建议 >=15 分钟。所有请求加 Accept-Language: zh-CN。失败用指数退避，连续失败则熔断并告警。",
+      "XML 解析: 用 fast-xml-parser (^4.5)，配置 {ignoreAttributes:false, removeNSPrefix:true, isArray:(name)=>name==='item'} 把 rss.channel.item 始终归一化为数组（单个 item 时不会被降级为对象）。用 ignoreAttributes:false 才能读到 enclosure 的 url 属性（@_url）和 nyaa:infoHash。",
+      "集数/字幕组命名解析: 主力用 anitomy-js（C++ anitomy 的 Node 绑定）解析 [Fansub] Title - 01 [1080p][x264] 这类英文/罗马音标题，能稳定提取 release_group、anime_title、episode_number、video_resolution、source。中文标题（如 [ANi] 异世界悠闲农家 2 - 11）需自写正则 fallback: /\\[([^\\]]+)\\]\\s*(.*?)\\s*-\\s*(\\d+(?:-\\d+)?)/。绝对集数映射需借助 anilist/bangumi 数据的 episode offset 表（后续刮削专题处理，本层只做原始解析）。",
+      "统一 magnet 获取: 设计 normalizeMagnet(item) 工具——dmhy 直取 enclosure.url；nyaa 取 nyaa:infoHash 拼 magnet 或用 enclosure/link 的 .torrent；mikan/bangumi 仅 .torrent，可用 webtorrent 包解析 .torrent Buffer 得 infoHash 再拼 magnet，并把站内 trackers 作为 &tr= 附加（mikan RSS 的 enclosure 通常不含 tracker，需补公共 tracker）。",
+      "本地缓存与去重: RSS 轮询结果按 guid/infoHash 去重写 Prisma，避免重复入库/重复下发 qBittorrent。记录每条种子的 source、fansub、rawTitle、parsedEpisode、bangumiId（后续 AI 刮削关联）。"
+    ],
+    "summary": "四站(dmhy/mikan/bangumi.moe/nyaa.si)均提供公开 RSS 2.0，且均支持搜索/分类过滤的 RSS 变体，是首选数据源——比 HTML 解析更稳定、免反爬。统一技术方案：Hono 后端用 Bun 内置 fetch 拉 RSS（XML），用 fast-xml-parser 解析，归一化为内部 Torrent 类型。dmhy 的 enclosure 直接是磁力链接(最省事)；mikan/bangumi.moe/nyaa.si 给的是 .torrent 文件 URL，需自己拼/解析磁力(nyaa RSS 已带 infoHash，可直接拼 magnet)。nyaa.si 的 HTML 端点可能被 Cloudflare 间歇 403，但 RSS 端点目前稳定可用。字幕组/集数解析推荐 anitomy-js 或自写正则(中文番名需自定义规则)。务必做请求限流(建议每站轮询间隔≥10min)与 UA 伪装，只抓公开 RSS/页面，不绕验证码。",
+    "topic": "动漫 BT 站抓取 (dmhy / mikan / bangumi.moe / nyaa.si) 技术方案"
+  },
+  "Bangumi 元数据 API": {
+    "apiOrDataPoints": [
+      {
+        "detail": "POST 请求,Body {keyword, sort:'match|heat|rank|score', filter:{type:[2], meta_tags, air_date, nsfw}}。返回 {found, items:[{id,name,name_cn,date,images,rating}]}。type=2 为动漫。",
+        "name": "搜索条目"
+      },
+      {
+        "detail": "GET,返回完整 Subject:{id,type,name,name_cn,summary,date,platform,infobox(WikiV0),eps,total_episodes,images,rating,meta_tags}。NSFW 需 token。",
+        "name": "获取条目详情"
+      },
+      {
+        "detail": "GET /v0/episodes?subject_id={id}&type=0&limit=200&offset=0。返回 {data:[Episode],total}。Episode:{id,type,name,name_cn,sort(同类序号),ep(条目内1起集数),airdate,duration}。",
+        "name": "章节列表(集数映射核心)"
+      },
+      {
+        "detail": "GET /v0/subjects/{id}/subjects。返回数组含续作/前作/番外 relation,用于多季识别与季号推断。",
+        "name": "条目关系(季映射)"
+      },
+      {
+        "detail": "部分条目在 Subject.infobox 数组中含 imdb/tvdb/tmdb/bangumi 等键,需自行解析 value(可能为字符串或嵌套 k/v 数组)。覆盖率低,非保证字段。",
+        "name": "第三方交叉ID(非结构化)"
+      }
+    ],
+    "confidence": "high",
+    "gotchas": [
+      "User-Agent 强制要求:默认 axios/got/fetch 的 UA 会被封禁。必须设为 '开发者ID/应用名 (项目主页)' 形式,如 'lonzzi/shikigami (https://github.com/lonzzi/shikigami)'。Hono 后端的 fetch 客户端层统一注入。",
+      "官方未公开明确 QPS 数值,实测社区共识约 1 req/s 级别保守使用;务必在进程内队列加节流(配合既定 cron+内存队列),否则触发 IP 封禁。Subject 详情有 300s 服务端缓存,可放心重读;搜索/episodes 节流要更严。",
+      "infobox 第三方 ID(imdb/tmdb/tvdb)非结构化、覆盖率低:仅部分热门条目有维护,格式不统一(value 可能是字符串或 {k,v} 数组)。不能依赖它做 Jellyfin/Emby 匹配的单一来源,需配合本地 AniDB/Bangumi 映射表 + 兜底。",
+      "EpType 区分:中文社区 RSS/BT 文件命名里的集数对应 type=0(本篇);SP/OVA/剧场归 1(特别篇),Jellyfin/Emby 命名需按类型分目录,否则刮削错乱。",
+      "Episode.ep vs sort:ep 是条目内本篇集数(从1连续),sort 是同类(含 SP/OP/ED)的全局序号。绝对集数跨季映射用 ep 的累加逻辑,不要混用 sort。",
+      "多季处理:同一 IP 下不同季在 Bangumi 是独立 subject,靠 relations 串联。'缺番'(如某季未播出/未收录)需在映射时跳过并记录,参考 AutoBangumi 的 fillEp 逻辑。",
+      "NSFW 内容(里番)默认返回 404,需 access token 才可见;若产品要支持需在 bgm.tv/dev/app 申请并让用户填入个人 token。",
+      "legacy /search/subject/{keywords} 和 /subject/{id}/ep 仍可用但属旧接口,官方建议迁 v0;新项目直接用 v0 避免后续维护成本。",
+      "mikan/dmhy 等 BT 站本身不提供 Bangumi ID,需通过解析文件名(标题+集数)后用 v0 搜索匹配,匹配歧义时需用户确认或用 fansub 标签辅助,这是匹配失败的高发点。"
+    ],
+    "libraries": [
+      {
+        "name": "自研 fetch 封装(无第三方SDK)",
+        "version": "Bun fetch",
+        "why": "bgm.tv v0 API 简单、官方无维护的 TS SDK,直接 fetch 最稳;封装统一 UA/token/节流/缓存"
+      },
+      {
+        "name": "bgm.tv v0 API(OpenAPI spec 来源)",
+        "version": "open-api/v0.yaml @ bangumi/api 仓库",
+        "why": "权威 schema 来源,可基于它生成 TS 类型"
+      },
+      {
+        "name": "openapi-typescript",
+        "version": "^7.x",
+        "why": "用 bangumi/api 的 open-api/v0.yaml 生成精确 TS 类型,避免手写 Subject/Episode 接口出错"
+      },
+      {
+        "name": "p-limit 或进程内队列(已定)",
+        "version": "p-limit ^6.x / 自研",
+        "why": "控制 bgm.tv 调用并发,规避频率限制触发封禁"
+      }
+    ],
+    "recommendedApproach": [
+      "后端 apps/backend 写一个 `services/bangumi.ts` 统一封装:base URL `https://api.bgm.tv`,所有请求注入 `User-Agent: lonzzi/shikigami/v{version} (https://github.com/{user}/shikigami)`;有 token 时追加 `Authorization: Bearer <access_token>`。用单例 P-Limit / token bucket 限流到 1 req/s 以下(建议 600-800ms 间隔 + 指数退避重试 429)。",
+      "【匹配条目】POST `https://api.bgm.tv/v0/search/subjects` body=`{keyword:'<解析出的日文/中文标题>', sort:'match', filter:{type:[2]}}`。对 BT 文件名先做清洗(去掉字幕组/分辨率/编码标签),取原名优先匹配,name_cn 次之。type=2 即 anime。建议保留 top-5 候选交 AI 二次裁决(用既定 OpenAI 兼容 API:把候选 summary+date 交给 LLM 选最匹配),置信度低时前端让人工确认。",
+      "【拉取集数表】GET `https://api.bgm.tv/v0/episodes?subject_id={id}&type=0&limit=200&offset=0`。type=0 只取本篇(SP/OVA 单独处理)。逐页 offset 翻到 total 取完,落库到 Prisma `Episode` 表(存 episode_id/sort/ep/name_cn/airdate)。",
+      "【季/集数映射】核心字段:Episode.ep(条目内集数,从 1 起)用于单季内文件→集的精确对应;Episode.sort(同类排序)仅在跨类型时参考。多季场景:GET `https://api.bgm.tv/v0/subjects/{id}/subjects` 取 relations(type=续作 seq/principal 等),沿关系链建'系列树',计算每季的起始绝对集数(offset = sum(前序各季本篇 ep 数))。参考 AutoBangumi 的 fillEp 策略:优先 ep 连续,缺番(airdate 为空或未播)时按 sort 填充占位。",
+      "【Jellyfin/Emby 交叉引用】bgm.tv 的 Subject.infobox(WikiV0)不是结构化外部 ID,只有部分条目在 infobox 里写了 imdb/tvdb/tmdb 等键(如 `[{key:'imdb_id',value:'tt...'},{key:'tmdb_id',value:'...'}]`),覆盖率低、格式不统一。工程上应:① 用 AniDB→TVDB/TMDB 的现成映射表(如 animetmdb / Anime-Lists/anime-lists.xml,这是 *arr 生态标准方案)做主路径;② bangum ID 作为中文侧主键;③ 两者通过中文名/罗马音/播出年模糊桥接。不要把 bgm.tv infobox 当成可靠的 TMDB 来源。",
+      "【缓存与节流】GET /v0/subjects/{id} 服务端已 cache 300s,本地再用内存/SQLite 缓存 subject+episodes 7-30 天(BT 元数据变化慢);并发严格 ≤1。NSFW 条目未带 token 时返回 404,若产品要支持里番刮削需让用户在设置里填 access token(https://bgm.tv/dev/app 申请个人 token)。",
+      "【OpenAI 兼容 API 辅助】把'文件名→候选 subject'的二次确认、以及 infobox 非结构化外部 ID 的抽取,交给 LLM:prompt 给候选 list 让其输出 `{subject_id, confidence}`;infobox 文本抽取外部 ID 时让 LLM 返回 `{tmdb_id, tvdb_id, imdb_id} | null`。base_url/key 沿用全局配置,可指向本地 Ollama(qwen2.5/llama3 即可胜任这类结构化抽取)。"
+    ],
+    "summary": "中文动漫社区首选 bgm.tv(Bangumi) v0 API,base URL `https://api.bgm.tv`,核心端点:POST /v0/search/subjects(搜索)、GET /v0/subjects/{id}(条目详情)、GET /v0/episodes?subject_id=&type=0(本篇章节列表)、GET /v0/subjects/{id}/subjects(条目关系,用于季/续作映射)。集数映射关键字段是 Episode.ep(条目内集数,从1起)与 Episode.sort(同类排序),跨季绝对集数需结合 Subject Relations 自行计算。Jellyfin/Emby 的 TVDB/TMDB 交叉引用 bgm.tv 不提供结构化字段,需解析半结构化 infobox,工程上建议走 AniDB/anime-lists.xml 这类现成映射表为主路径,bgm 作中文主键。必须设置带开发者信息的 User-Agent,默认 UA 会被禁;无明确公开 QPS,实测保守按 ≤1 req/s + 指数退避处理 429。无需第三方 SDK,用 Bun 原生 fetch 封装即可。",
+    "topic": "Bangumi (bgm.tv) 元数据 API 研究与中文动漫匹配方案"
+  },
+  "qBittorrent Web API 集成": {
+    "apiOrDataPoints": [
+      {
+        "detail": "POST，form: username/password，成功 200 + Set-Cookie: SID=...; 失败多 → 403 (IP ban)",
+        "name": "POST /api/v2/auth/login"
+      },
+      {
+        "detail": "qBittorrent v5.2.0+ 用，Authorization: Bearer <apiKey> 替代 cookie",
+        "name": "Bearer API Key 鉴权"
+      },
+      {
+        "detail": "GET，参数 filter/category/tag/sort/limit/offset/hashes，返回含 hash/name/state/progress/content_path/save_path/completion_on",
+        "name": "GET /api/v2/torrents/info"
+      },
+      {
+        "detail": "POST multipart/form-data，urls(magnet)|torrents(文件)，savepath/category/tags/paused/contentLayout/ratioLimit/seedingTimeLimit",
+        "name": "POST /api/v2/torrents/add"
+      },
+      {
+        "detail": "完成态判定: state ∈ {uploading, pausedUP, stoppedUP, stalledUP, checkingUP, forcedUP, queuedUP} 或 progress===1",
+        "name": "完成检测 (state)"
+      },
+      {
+        "detail": "POST，form: hashes + deleteFiles=true 删除数据 / false 保留",
+        "name": "POST /api/v2/torrents/delete"
+      },
+      {
+        "detail": "POST 创建，key=类名 value={name,savePath}；配合 add 时的 category 参数自动归类+savePath",
+        "name": "POST /api/v2/torrents/createCategory"
+      },
+      {
+        "detail": "手动启用 qB RSS 自动下载: addFeed/setRule/rules；规则含 enabled/mustContain/mustNotContain/useRegex/affectedFeeds/savePath/category",
+        "name": "RSS: /api/v2/rss/*"
+      }
+    ],
+    "confidence": "high",
+    "gotchas": [
+      "Cookie 名在 qB v5.0 默认仍是 SID，但 @ctrl/qbittorrent 会从 Set-Cookie 动态解析 cookieName 而非写死 'SID'，兼容某些自定义编译版;代码里同时发 Cookie + Basic Auth 以防 cookie 失效。",
+      "qBittorrent v5 (Web API v2.11.0) 把 pausedUP/pausedDL 重命名为 stoppedUP/stoppedDL;官方 5.0 wiki 文档对响应里仍写旧名,@ctrl/qbittorrent 的 TorrentState enum 同时列了两套 —— 完成判定逻辑必须同时容忍 stoppedUP 与 pausedUP，否则 v4/v5 混部会漏判。",
+      "CSRF + Host Header Validation 默认开启:从独立 origin(前端直连 8080)调用会被拒;必须靠后端 BFF 转发(本项目架构天然满足,前端只调 hono 后端),或把前端域名加进 qB 的 web_ui_domain_list。",
+      "暴力破解保护:连续失败(默认 5 次 web_ui_max_auth_fail_count)触发 IP ban(web_ui_ban_duration 默认 3600s),期间登录返回 HTTP 403;生产环境务必复用 client 单例、避免重复 login,必要时通过 setPreferences 放宽但注意安全。",
+      "添加种子返回 200 不等于成功:v5+ 返回 JSON {success_count, pending_count, failure_count, added_torrent_ids}(@ctrl 已封装 assertAddTorrentSucceeded);旧版返回 'Fails.'/'Ok.' 字符串,需自行校验。",
+      "硬链接要求源(completed_path)和目标(媒体库)在同一文件系统+同一 inode 边界;Docker 里 qB 和媒体库若挂在不同卷/overlay 层,fs.link 会 EXDEV 失败 —— docker-compose 里必须共享同一个 volume 或 bind mount 同一主机目录。",
+      "做种期间 content_path 被 qB 占用,硬链接(不删原件)可安全做种 + 刮削;若用 fs.rename/setTorrentLocation 移动会打断做种。",
+      "addTorrent 的 useAutoTMM=true 会忽略 savepath/category 自定义路径(由 qB 自动管理);要精确控制 savepath 必须设 useAutoTMM=false。",
+      "RSS 规则字段(banned 列表/savePath/category 等)我从库 wiki 已知格式 + @ctrl 等实现推断,官方 wiki 的 RSS 详细章节在该页面被截断,字段名建议先用 GET /api/v2/rss/rules 拉一条真实规则反推 schema 后再写 setRule(confidence 中)。",
+      "Bun 上 ofetch 走原生 fetch(经 node-fetch-native 的 bun export),无 polyfill;但 Bun 对 multipart FormData 的边界处理与 Node 略有差异 —— 上传 .torrent 文件时建议用 client 已封装的 createTorrentFile 帮助函数,避免手搓 FormData。"
+    ],
+    "libraries": [
+      {
+        "name": "@ctrl/qbittorrent",
+        "version": "^9.13.0 (实际仓库 github.com/scttcper/qbittorrent,非 ctrl/)",
+        "why": "TypeScript 一等公民,基于 ofetch + node-fetch-native;后者 exports 含专门的 \"bun\" 条件(./dist/native.mjs),Bun 原生 fetch 直接跑,无 polyfill。自动 SID cookie 管理 + 过期/403 自动重登(ensureAuthenticated)。engines: node>=18。导出完整 Torrent/TorrentState/Preferences 类型。支持 v5.2.0 API Key 鉴权(apiKey 配置)。weekly 维护活跃(2026-06 仍更新)。依赖: cookie(解析 SID)、ufo、type-fest、@ctrl/torrent-file(种子解析)、uint8array-extras。"
+      },
+      {
+        "name": "ofetch (依赖,随 @ctrl/qbittorrent 引入)",
+        "version": "^1.5.1",
+        "why": "unjs 的 fetch 封装,被 @ctrl/qbittorrent 用作 HTTP 底层;Bun/Deno/Node/浏览器通用,无需单独安装。"
+      },
+      {
+        "name": "Bun 原生 fs.link / node:fs promisify",
+        "version": "内置 (Bun runtime)",
+        "why": "硬链接创建用 Bun 自带 fs.link(src, dest),无需第三方包;配合完成回调把已下载文件链入媒体库目录。"
+      }
+    ],
+    "recommendedApproach": [
+      "客户端库: 用 @ctrl/qbittorrent@^9.13.0 (真实仓库 github.com/scttcper/qbittorrent, 基于 ofetch+node-fetch-native; node-fetch-native 的 exports 里有专门的 \"bun\" 条件 → Bun 走原生 fetch, 无需 polyfill)。封装为单例 QbtClient (进程内复用, 避免反复 login 触发 IP ban)。",
+      "认证 (默认走 cookie/SID): 构造 const qb = new QBittorrent({ baseUrl: 'http://host:port', username, password }); 库的 ensureAuthenticated() 会在 sid 过期或缺失时自动重新 POST /api/v2/auth/login 并解析 Set-Cookie 里的 SID; qB v5.2.0+ 可改用 apiKey 配置项, 走 Authorization: Bearer <apiKey> (免 cookie、免 CSRF 烦恼, 推荐生产)。注意 qB v5 仍默认开 web_ui_csrf_protection_enabled + web_ui_host_header_validation_enabled → 前端不可直连 qB, 必须经后端 BFF 转发 (本项目 Hono 后端天然满足)。",
+      "添加磁力: POST /api/v2/torrents/add (multipart/form-data), urls 字段放 magnet:?xt=...; 关键选项 savepath/category/tags/paused/contentLayout('Original'|'Subfolder'|'NoSubfolder')/useAutoTMM('false' 才让 savepath 生效)/ratioLimit/seedingTimeLimit。库映射: qb.addMagnet(magnetUri, { savepath, category, tags, paused:'false', useAutoTMM:'false' })。",
+      "添加 .torrent 文件: 同一 /torrents/add 端点, torrents 字段放二进制 (Content-Type: application/x-bittorrent)。库: qb.addTorrent(fs.readFileSync(file), { savepath, category, tags })。v5+ 返回 JSON {success_count, pending_count, failure_count, added_torrent_ids}; 旧版返回 'Ok.'/'Fails.' 字符串 — 库已统一封装 assertAddTorrentSucceeded。",
+      "分类/标签: 提前建好 qb.createCategory('动漫', '/media/anime') (会带默认 savePath); 之后 add 传 category='动漫' 即自动归到该路径 (前提 useAutoTMM='false' 或 qB 开启 TMM 按分类)。标签用 qb.addTorrentTags(hash, 'fansub,1080p'); 标签是 v2.6.2+ 才有, 做种子组筛选很方便。",
+      "状态/进度查询: qb.listTorrents({ hashes?, filter:'downloading'|'completed'|'seeding'|..., category, tag, sort, limit, offset })。返回字段含 state, progress(0~1), dlspeed, upspeed, eta, completed, completion_on, content_path(绝对根路径), save_path。或增量同步 getSyncMainData(rid) 做 long-poll (rid 滚动号, 适合做种机监控大量种子时降负载)。",
+      "完成检测 (核心): 用 state 字段判定, 完成态集合 = {uploading, pausedUP, stoppedUP(v5), stalledUP, checkingUP, forcedUP, queuedUP} 或直接看 progress===1; 更稳妥用 completion_on>0 (Unix 秒, 未完成为 0/缺省)。注意 v5 把 pausedUP/pausedDL 重命名为 stoppedUP/stoppedDL (Web API v2.11.0 起) — 判定逻辑必须同时兼容两套 (@ctrl 的 TorrentState enum 已同时列出)。",
+      "做种与硬链接策略 (参考 sonarr): qB 完成后 content_path 指向下载根目录, 后端收到完成回调后用 Bun 内置 fs.link(src, dst) 在媒体库目录建硬链接 (同分区才生效), 重命名为 Jellyfin/Emby 规范名, 触发库扫描; 原种继续做种不受影响 (硬链接不删原件)。做种达标 (ratioLimit/seedingTimeLimit 命中或手动) 后调 qb.removeTorrent(hash, false) — 第二参 false 表示保留数据 (硬链接文件还在媒体库)。绝不调 removeTorrent(hash, true) 否则连媒体文件一起删。",
+      "完成回调轮询: qB Web API 无 webhook, 用 cron (node-cron) 每 N 秒轮询 listTorrents({filter:'completed'}) 对比上次快照找新完成项; 或用 getSyncMainData(rid) 增量。completion_on 字段是去重的关键指纹。",
+      "可选 qB RSS 自动下载 (备选/兜底): POST /api/v2/rss/addFeed (path, url) 添加订阅 → POST /api/v2/rss/setRule (ruleName, ruleDef JSON) 设自动下载规则; 规则 JSON 含 enabled/mustContain/mustNotContain/useRegex/affectedFeeds/savePath/category/addPaused/ignoreDays。但本工具链更推荐自己抓 dmhy/mikan RSS + AI 刮削后主动调 addMagnet, qB RSS 规则可作为离线兜底。相关偏好: rss_auto_downloading_enabled / rss_processing_enabled 通过 setPreferences 开关。",
+      "配置项 (后端 .env / config): QBT_BASE_URL (http://qbittorrent:8080), QBT_USERNAME, QBT_PASSWORD, QBT_API_KEY (v5.2+ 优先用, 跳过 cookie/CSRF), QBT_CATEGORY_DEFAULT (如 '动漫'), QBT_SAVEPATH_ROOT (/downloads 或 /media)。docker-compose 里 qB 与后端共享 /downloads 卷 (硬链接前提: 同一文件系统)。",
+      "部署注意 (docker-compose): qB v4 默认随机 WebUI 密码 (需配置 QBT_WEBUI_PASSWORD 或首次读日志); 本项目前后端分开 → qB 的 web_ui_host_header_validation 要么把后端服务名/域名加进 web_ui_domain_list, 要么靠后端 BFF 同源转发 (推荐后者, 顺带隐藏 qB 凭据)。"
+    ],
+    "summary": "推荐用 @ctrl/qbittorrent@9.13.0 (实际仓库 github.com/scttcper/qbittorrent，基于 ofetch + node-fetch-native)。node-fetch-native 的 exports 里专门声明了 \"bun\" 条件 (./dist/native.mjs)，所以 Bun 下直接走原生 fetch，无需 polyfill。该库封装完整: 自动 SID cookie 管理 + 过期自动重登、v5.2+ API Key 鉴权、完整 TypeScript 类型 (Torrent/TorrentState/Preferences)、addTorrent/addMagnet/listTorrents/createCategory/setTorrentCategory 等全覆盖。认证走 cookie/SID (POST /api/v2/auth/login)，v5.2.0+ 可改用 Bearer API Key。完成检测靠 state 字段: 完成态 = uploading/pausedUP/stoppedUP/stalledUP/checkingUP/forcedUP/queuedUP，或 progress===1，或 completion_on>0。硬链接策略: qB 原生无硬链接导出，按 Sonarr/Arr 模式 —— 把下载目录与媒体库放同一文件系统，完成 + 做种时用 Bun 原生 fs.link() 把 content_path 下的文件硬链到媒体目录，刮削后触发 Jellyfin/Emby 库扫描，绝不删原件 (removeTorrent(hash,false))。qB v5 已把 pausedUP/pausedDL 改名为 stoppedUP/stoppedDL (Web API v2.11.0)，代码需同时兼容两套名字。",
+    "topic": "qBittorrent Web API 集成 (Hono + Bun + TypeScript, 动漫 BT 工具链)"
+  }
+}

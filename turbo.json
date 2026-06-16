@@ -1,0 +1,37 @@
+{
+  "$schema": "https://turborepo.dev/schema.json",
+  "globalEnv": [
+    "DATABASE_URL",
+    "JWT_SECRET",
+    "ENCRYPTION_KEY",
+    "ADMIN_USERNAME",
+    "ADMIN_PASSWORD",
+    "LLM_BASE_URL",
+    "LLM_API_KEY",
+    "LLM_MODEL",
+    "QBT_BASE_URL",
+    "QBT_USERNAME",
+    "QBT_PASSWORD"
+  ],
+  "tasks": {
+    "build": {
+      "dependsOn": ["^build", "^generate"],
+      "inputs": ["$TURBO_DEFAULT$", ".env*"],
+      "outputs": ["dist/**", "apps/backend/public/**"]
+    },
+    "generate": {
+      "cache": false
+    },
+    "typecheck": {
+      "dependsOn": ["^generate"]
+    },
+    "test": {
+      "dependsOn": ["generate"],
+      "env": ["LLM_REVIEW_THRESHOLD", "LLM_DAILY_BUDGET_USD"]
+    },
+    "dev": {
+      "cache": false,
+      "persistent": true
+    }
+  }
+}

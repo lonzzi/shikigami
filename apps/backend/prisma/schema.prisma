@@ -1,0 +1,351 @@
+// ============================================================
+// Shikigami 数据模型
+// 设计原则:
+//   - Prisma SQLite 不支持原生 Json: 结构化字段用 String + zod 解析
+//   - SQLite 无 enum 约束: enum 以 TEXT 存储, 靠 service 层 zod 兜底
+//   - 文件大小用 BigInt
+//   - 主键统一 cuid()
+//   - 级联: 生产路径 Cascade, 订阅关联 SetNull
+//   - WAL 模式(Prisma SQLite 默认开启), 优雅关闭里 wal_checkpoint(TRUNCATE)
+//   - datasource url 统一 file:/data/shikigami.db
+//   - generator 用 prisma-client(6.x 新名), 输出到 ../generated/prisma
+// ============================================================
+
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================
+// 作品条目
+// ============================================================
+model Series {
+  id           String   @id @default(cuid())
+  bangumiId    Int?     @unique
+  tmdbId       Int?
+  tvdbId       Int?
+  anidbId      Int?
+  titleJp      String
+  titleCn      String?
+  titleEn      String?
+  year         Int?
+  seasonCount  Int      @default(1)
+  // 绝对集→季集映射: 每季首集绝对集号 1-based
+  // {"1":1,"2":14,"3":26} = S1 从 abs=1 起, S2 从 abs=14 起, S3 从 abs=26 起
+  seasonOffset String?
+  // cour 模式: split=每 cour 独立季号, absolute=长番连续
+  courMode     String   @default("absolute")
+  totalEpisodes Int?
+  status       String   @default("ONGOING")
+  airWeekday   Int?
+  posterUrl    String?
+  metadataRaw  String?
+  lockedAt     DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  episodes      Episode[]
+  subscriptions Subscription[]
+  mediaFiles    MediaFile[]
+  overrides     EpisodeOverride[]
+
+  @@index([status, airWeekday])
+  @@index([tmdbId])
+  @@index([titleCn])
+}
+
+// ============================================================
+// 集
+// type: MAIN=0 本篇 / SPECIAL=1(S00E##) / OP=2 / ED=3 / PREVIEW=4 / OTHER=6
+// ============================================================
+model Episode {
+  id             String   @id @default(cuid())
+  seriesId       String
+  series         Series   @relation(fields: [seriesId], references: [id], onDelete: Cascade)
+
+  bangumiEpId    Int?     @unique
+  type           Int      @default(0)
+  sort           Int?
+  ep             Int?
+  absoluteNumber Int?
+  epInSeason     Int?
+  seasonIndex    Int      @default(1)
+  titleJp        String?
+  titleCn        String?
+  airdate        String?
+  duration       Int?
+
+  mediaFiles MediaFile[]
+
+  @@index([seriesId, absoluteNumber])
+  @@index([seriesId, seasonIndex, epInSeason])
+}
+
+// ============================================================
+// 订阅规则
+// filterRule JSON: { sources, keyword, teamIds, sortId, resolutionMin,
+//   fansubs, blacklist, preferredLang:"CHS|CHT|DUAL|ANY",
+//   fallbackResolution:["1080p","720p"] }
+// ============================================================
+model Subscription {
+  id             String    @id @default(cuid())
+  name           String
+  seriesId       String?
+  series         Series?   @relation(fields: [seriesId], references: [id], onDelete: SetNull)
+  enabled        Boolean   @default(true)
+
+  filterRule     String
+  matchHints     String?
+
+  category       String    @default("动漫")
+  savePath       String?
+  paused         Boolean   @default(false)
+  autoRename     Boolean   @default(true)
+
+  lastSeenPubDate DateTime?
+  lastRunAt      DateTime?
+  lastMatchCount Int       @default(0)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  downloadTasks DownloadTask[]
+
+  @@index([enabled])
+  @@index([seriesId])
+}
+
+// ============================================================
+// 下载任务（对接 qBittorrent）
+// status: PENDING → DOWNLOADING → COMPLETED → (导入链)
+//         ↘ ERROR → RETRY → DOWNLOADING
+//         ↘ ABANDONED (死种, 清 MagnetSeen 允许换源)
+//         ↘ PENDING_DISK_FULL
+//         ↘ PAUSED | SEEDING | CHECKING | REMOVED
+// ============================================================
+model DownloadTask {
+  id            String      @id @default(cuid())
+  subscriptionId String?
+  subscription  Subscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+  seriesId      String?
+
+  infoHash      String      @unique
+  source        String
+  sourceItemId  String?
+  magnet        String?
+  torrentUrl    String?
+  rawTitle      String
+  parsedTitle   String?
+  fansub        String?
+  subtitleLang  String?
+  sizeBytes     BigInt
+  pubDate       DateTime?
+
+  status        String      @default("PENDING")
+  qbStateRaw    String?
+  progress      Float       @default(0)
+  hash          String?
+  savePath      String?
+  stalledSince  DateTime?
+  completedAt   DateTime?
+  addedAt       DateTime    @default(now())
+  updatedAt     DateTime    @updatedAt
+
+  mediaFiles MediaFile[]
+
+  @@index([subscriptionId])
+  @@index([status])
+  @@index([source, sourceItemId])
+}
+
+// ============================================================
+// 媒体文件（落盘 + AI 刮削状态机）
+// 一个 DownloadTask 可产出多个 MediaFile:
+//   - 单集种: 1 video + N subtitle + N font
+//   - 合集种: N video + N subtitle
+// scrapeState: PENDING → MATCHED → REVIEWED → RENAMED → EXPORTED
+//   REVIEWED/LOCKED 默认 rescrape 跳过(force=true 才覆盖)
+//   FAILED 可重跑(重跑前清理半成品硬链)
+// kind: video | subtitle | font | other
+// ============================================================
+model MediaFile {
+  id             String   @id @default(cuid())
+  downloadTaskId String
+  downloadTask   DownloadTask @relation(fields: [downloadTaskId], references: [id], onDelete: Cascade)
+  seriesId       String?
+  series         Series?  @relation(fields: [seriesId], references: [id], onDelete: SetNull)
+  episodeId      String?
+  episode        Episode? @relation(fields: [episodeId], references: [id], onDelete: SetNull)
+
+  kind           String   @default("video")
+  sourcePath     String
+  libraryPath    String?
+  fileName       String
+  sizeBytes      BigInt
+
+  scrapeState    String   @default("PENDING")
+  scrapeResult   String?
+  scrapeError    String?
+  scrapedAt      DateTime?
+  reviewedBy     String?
+  reviewedAt     DateTime?
+
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  // 同集同语言版本撞名拦截(应用层校验, 落库阶段拦)
+  @@unique([seriesId, libraryPath])
+  @@index([scrapeState])
+  @@index([seriesId])
+  @@index([downloadTaskId])
+}
+
+// ============================================================
+// 跨订阅磁链去重
+// invalidated=true 时允许换源重下(ABANDONED 时置 true)
+// ============================================================
+model MagnetSeen {
+  id             String   @id @default(cuid())
+  infoHash       String   @unique
+  source         String
+  sourceItemId   String?
+  firstSeenAt    DateTime @default(now())
+  downloadTaskId String?
+  invalidated    Boolean  @default(false)
+
+  @@index([source, sourceItemId])
+}
+
+// ============================================================
+// 集(episodeId)级二级去重
+// 合集种与单集种 infoHash 不同但可能撞集, MagnetSeen 拦不住
+// ============================================================
+model EpisodeDedup {
+  id           String   @id @default(cuid())
+  seriesId     String
+  seasonIndex  Int
+  epInSeason   Int
+  mediaFileId  String?
+  infoHash     String?
+  createdAt    DateTime @default(now())
+
+  @@unique([seriesId, seasonIndex, epInSeason])
+  @@index([seriesId])
+}
+
+// ============================================================
+// 人工覆盖: 用户修正的绝对集→季集映射, 权威, 覆盖 seasonOffset
+// ============================================================
+model EpisodeOverride {
+  id             String   @id @default(cuid())
+  seriesId       String
+  series         Series   @relation(fields: [seriesId], references: [id], onDelete: Cascade)
+  absoluteNumber Int
+  season         Int
+  episode        Int
+  source         String   @default("manual")
+  note           String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@unique([seriesId, absoluteNumber])
+  @@index([seriesId])
+}
+
+// ============================================================
+// AI 刮削结果缓存
+// key = 归一化文件名指纹(去 CRC/分辨率/版本号差异后的稳定 hash)
+// ============================================================
+model ScrapeCache {
+  id              String   @id @default(cuid())
+  fingerprint     String   @unique
+  rawFilename     String
+  result          String
+  model           String
+  promptTokens    Int?
+  completionTokens Int?
+  costUsd         Float    @default(0)
+  createdAt       DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+// ============================================================
+// Few-shot 自学习池: 人工修正回写, 按 release_group/title LRU 检索注入 prompt
+// reviewStatus: pending | approved | rejected
+// ============================================================
+model FewShotSample {
+  id            String   @id @default(cuid())
+  filename      String
+  output        String
+  releaseGroup  String?
+  titleKey      String?
+  seriesId      String?
+  source        String   @default("manual")
+  reviewStatus  String   @default("approved")
+  createdAt     DateTime @default(now())
+  lastUsedAt    DateTime?
+
+  @@index([releaseGroup, lastUsedAt])
+  @@index([titleKey])
+}
+
+// ============================================================
+// LLM 调用记账
+// ============================================================
+model LlmCall {
+  id              String   @id @default(cuid())
+  mediaFileId     String?
+  model           String
+  promptTokens    Int
+  completionTokens Int
+  costUsd         Float
+  finishReason    String?
+  success         Boolean
+  error           String?
+  cached          Boolean  @default(false)
+  createdAt       DateTime @default(now())
+
+  @@index([createdAt])
+}
+
+// ============================================================
+// 配置: 敏感值 enc:<iv>:<ciphertext>, 主密钥从 ENCRYPTION_KEY 派生
+// ============================================================
+model Settings {
+  key       String   @id
+  category  String
+  value     String
+  encrypted Boolean  @default(false)
+  updatedAt DateTime @updatedAt
+
+  @@index([category])
+}
+
+// ============================================================
+// Cron 运行审计 + 任务持久化
+// status: queued | running | success | failed | abandoned
+// checkpoint: JSON, 当前阶段断点(如 "scraped","linked")
+// ============================================================
+model JobRun {
+  id           String   @id @default(cuid())
+  kind         String
+  status       String
+  queueTaskId  String?
+  checkpoint   String?
+  payload      String?
+  result       String?
+  error        String?
+  runs         Int      @default(0)
+  startedAt    DateTime?
+  finishedAt   DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([kind, status])
+  @@index([status])
+}
