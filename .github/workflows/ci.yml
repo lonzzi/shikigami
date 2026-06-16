@@ -35,10 +35,15 @@ jobs:
       - name: Install
         run: pnpm install --frozen-lockfile
 
-      # turbo 编排: typecheck/test 自动先跑 generate(prisma client)。
-      # 需要的 env 一次性注入,由 turbo globalEnv 声明参与缓存。
       - name: Lint & format check
         run: pnpm check
+
+      # 显式 generate prisma client（typecheck/test 依赖 generated 类型）
+      - name: Generate Prisma client
+        working-directory: apps/backend
+        env:
+          DATABASE_URL: file:/tmp/ci.db
+        run: bunx prisma generate
 
       - name: Typecheck & Test (turbo)
         env:
@@ -48,7 +53,7 @@ jobs:
           LLM_BASE_URL: https://api.openai.com/v1
           QBT_BASE_URL: http://localhost:8080
           ADMIN_PASSWORD: ci-test
-        run: pnpm exec turbo run typecheck test
+        run: pnpm exec turbo run typecheck test --force
 
       - name: Build (turbo)
         env:
