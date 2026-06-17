@@ -12,7 +12,8 @@ FROM oven/bun:1.3 AS web-build
 WORKDIR /app
 # 整个 repo 拷进来, 保证 catalog/workspace 解析完整, vite 等 devDeps 能装
 COPY . .
-RUN bun install
+# --ignore-scripts 跳过 simple-git-hooks 等 postinstall(容器内无 git)
+RUN bun install --ignore-scripts
 WORKDIR /app/apps/web
 RUN bun run build
 
@@ -21,8 +22,8 @@ FROM oven/bun:1.3 AS backend-build
 WORKDIR /app
 COPY . .
 WORKDIR /app/apps/backend
-RUN bun install
-# prisma generate 需要 schema
+RUN bun install --ignore-scripts
+# prisma generate 需要 schema(单独跑, 不被 --ignore-scripts 影响)
 RUN bunx prisma generate
 
 # ---------- Stage 3: 运行时 ----------
