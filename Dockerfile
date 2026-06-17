@@ -10,8 +10,8 @@
 # ---------- Stage 1: 前端构建 ----------
 FROM oven/bun:1.3 AS web-build
 WORKDIR /app
-COPY pnpm-workspace.yaml package.json ./
-COPY apps/web ./apps/web
+# 整个 repo 拷进来, 保证 catalog/workspace 解析完整, vite 等 devDeps 能装
+COPY . .
 RUN bun install
 WORKDIR /app/apps/web
 RUN bun run build
@@ -19,8 +19,7 @@ RUN bun run build
 # ---------- Stage 2: 后端构建（依赖 + prisma generate） ----------
 FROM oven/bun:1.3 AS backend-build
 WORKDIR /app
-COPY pnpm-workspace.yaml package.json ./
-COPY apps/backend ./apps/backend
+COPY . .
 WORKDIR /app/apps/backend
 RUN bun install
 # prisma generate 需要 schema
