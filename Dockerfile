@@ -11,7 +11,7 @@
 FROM oven/bun:1.3 AS web-build
 WORKDIR /app
 COPY . .
-RUN corepack enable && corepack prepare pnpm@latest --activate
+RUN npm install -g pnpm
 RUN pnpm install --frozen-lockfile --ignore-scripts
 WORKDIR /app/apps/web
 RUN pnpm run build
@@ -20,8 +20,7 @@ RUN pnpm run build
 FROM oven/bun:1.3 AS backend-build
 WORKDIR /app
 COPY . .
-# 用 pnpm 而非 bun install: backend 依赖用了 pnpm catalog: 语法, bun 不认
-RUN corepack enable && corepack prepare pnpm@latest --activate
+RUN npm install -g pnpm
 RUN pnpm install --frozen-lockfile --ignore-scripts
 WORKDIR /app/apps/backend
 # prisma generate 需要 schema
