@@ -8,23 +8,23 @@
 # ============================================================
 
 # ---------- Stage 1: 前端构建 ----------
-FROM oven/bun:1.3 AS web-build
+FROM node:22-slim AS web-build
 WORKDIR /app
 COPY . .
-RUN npm install -g pnpm
+RUN corepack enable && corepack prepare pnpm@latest --activate
 RUN pnpm install --frozen-lockfile --ignore-scripts
 WORKDIR /app/apps/web
 RUN pnpm run build
 
 # ---------- Stage 2: 后端构建（依赖 + prisma generate） ----------
-FROM oven/bun:1.3 AS backend-build
+FROM node:22-slim AS backend-build
 WORKDIR /app
 COPY . .
-RUN npm install -g pnpm
+RUN corepack enable && corepack prepare pnpm@latest --activate
 RUN pnpm install --frozen-lockfile --ignore-scripts
 WORKDIR /app/apps/backend
 # prisma generate 需要 schema
-RUN bunx prisma generate
+RUN npx prisma generate
 
 # ---------- Stage 3: 运行时 ----------
 FROM oven/bun:1.3 AS runtime
