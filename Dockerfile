@@ -10,20 +10,21 @@
 # ---------- Stage 1: 前端构建 ----------
 FROM oven/bun:1.3 AS web-build
 WORKDIR /app
-# 整个 repo 拷进来, 保证 catalog/workspace 解析完整, vite 等 devDeps 能装
 COPY . .
-# --ignore-scripts 跳过 simple-git-hooks 等 postinstall(容器内无 git)
-RUN bun install --ignore-scripts
+RUN corepack enable && corepack prepare pnpm@latest --activate
+RUN pnpm install --frozen-lockfile --ignore-scripts
 WORKDIR /app/apps/web
-RUN bun run build
+RUN pnpm run build
 
 # ---------- Stage 2: 后端构建（依赖 + prisma generate） ----------
 FROM oven/bun:1.3 AS backend-build
 WORKDIR /app
 COPY . .
+# 用 pnpm 而非 bun install: backend 依赖用了 pnpm catalog: 语法, bun 不认
+RUN corepack enable && corepack prepare pnpm@latest --activate
+RUN pnpm install --frozen-lockfile --ignore-scripts
 WORKDIR /app/apps/backend
-RUN bun install --ignore-scripts
-# prisma generate 需要 schema(单独跑, 不被 --ignore-scripts 影响)
+# prisma generate 需要 schema
 RUN bunx prisma generate
 
 # ---------- Stage 3: 运行时 ----------
