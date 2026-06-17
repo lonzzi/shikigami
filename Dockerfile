@@ -1,54 +1,41 @@
-# syntax=docker/dockerfile:1
 # ============================================================
-# Shikigami 多阶段构建
-#   web-build:    构建前端 dist
-#   backend-build: prisma generate + 后端依赖（含 @prisma/client 运行时）
-#   runtime:      精简运行镜像，USER 1000:1000，entrypoint 跑 migrate
-# 架构评审 I9: build 与 CMD 一致（bun run dist/index.js）。
+# Shikigami 多阶段构建 (全 node:22-slim, 避免架构/openssl 差异)
 # ============================================================
 
 # ---------- Stage 1: 前端构建 ----------
 FROM node:22-slim AS web-build
 WORKDIR /app
 COPY . .
-RUN corepack enable && corepack prepare pnpm@latest --activate
-RUN pnpm install --frozen-lockfile --ignore-scripts
+RUN corepack enable pnpm
+RUN pnpm config set registry https://registry.npmmirror.com && pnpm install --frozen-lockfile --ignore-scripts
 WORKDIR /app/apps/web
 RUN pnpm run build
 
-# ---------- Stage 2: 后端构建（依赖 + prisma generate） ----------
+# ---------- Stage 2: 后端构建 ----------
 FROM node:22-slim AS backend-build
 WORKDIR /app
 COPY . .
-RUN corepack enable && corepack prepare pnpm@latest --activate
-RUN pnpm install --frozen-lockfile --ignore-scripts
+RUN corepack enable pnpm
+RUN pnpm config set registry https://registry.npmmirror.com && pnpm install --frozen-lockfile --ignore-scripts
+RUN apt-get update -y && apt-get install -y openssl
 WORKDIR /app/apps/backend
-# prisma generate 需要 schema
 RUN npx prisma generate
 
 # ---------- Stage 3: 运行时 ----------
-FROM oven/bun:1.3 AS runtime
+FROM node:22-slim AS runtime
+RUN apt-get update -y && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
-USER 1000:1000
 
-# 拷贝后端源码 + 生成的 prisma client + migration
 COPY --from=backend-build /app/apps/backend/src ./apps/backend/src
-COPY --from=backend-build /app/apps/backend/tsconfig.json ./apps/backend/tsconfig.json
-COPY --from=backend-build /app/apps/backend/package.json ./apps/backend/package.json
 COPY --from=backend-build /app/apps/backend/prisma ./apps/backend/prisma
 COPY --from=backend-build /app/apps/backend/generated ./apps/backend/generated
+COPY --from=backend-build /app/package.json /app/pnpm-workspace.yaml /app/pnpm-lock.yaml ./
+COPY --from=backend-build /app/apps/backend/package.json ./apps/backend/package.json
 COPY --from=backend-build /app/node_modules ./node_modules
 COPY --from=backend-build /app/apps/backend/node_modules ./apps/backend/node_modules
-
-# 拷贝前端构建产物（由后端 serveStatic 托管）
 COPY --from=web-build /app/apps/web/dist ./apps/backend/public
-
-# 拷贝 workspace 根配置（pnpm catalog 解析需要）
-COPY --from=backend-build /app/pnpm-workspace.yaml /app/package.json ./
 
 WORKDIR /app/apps/backend
 ENV NODE_ENV=production
 EXPOSE 3000
-
-ENTRYPOINT ["sh", "/app/docker-entrypoint.sh"]
-CMD ["bun", "run", "src/index.ts"]
+CMD ["npx", "tsx", "src/index.ts"]
