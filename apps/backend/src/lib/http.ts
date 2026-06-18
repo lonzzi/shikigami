@@ -41,7 +41,8 @@ export async function httpGet(url: string, opts: HttpGetOptions = {}): Promise<s
         if (!headers['Content-Type'])
           (init.headers as Record<string, string>)['Content-Type'] = 'application/json';
       }
-      const res = await fetch(url, init);
+      const proxy = process.env.HTTPS_PROXY || process.env.HTTP_PROXY || process.env.https_proxy || process.env.http_proxy;
+      const res = await fetch(url, { ...init, ...(proxy ? { proxy } : {}) });
       clearTimeout(timer);
 
       if (res.ok) return res.text();
