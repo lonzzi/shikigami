@@ -7,6 +7,9 @@ import { Input, Label, SectionHeader } from '@/components/ui/primitives';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { rpc } from '@/lib/api';
 
+/** 敏感字段已设置的脱敏占位（与后端 routes/settings.ts 的 MASK 保持一致）。 */
+const MASK = '••••••••••••';
+
 const FIELDS: {
   key: string;
   label: string;
@@ -109,7 +112,7 @@ export function SettingsPage() {
                       value={form[f.key] ?? ''}
                       onChange={(e) => setForm((prev) => ({ ...prev, [f.key]: e.target.value }))}
                       placeholder={
-                        f.placeholder ?? (data?.[f.key] === '***' ? '••••（已设置，留空不改）' : '')
+                        f.placeholder ?? (data?.[f.key] === MASK ? '已设置，留空不修改' : '')
                       }
                     />
                   </div>

@@ -42,9 +42,9 @@ export const settings = new Hono()
         if (dbRow.encrypted) {
           try {
             const v = decrypt(dbRow.value);
-            out[f.key] = f.sensitive ? '***' : v;
+            out[f.key] = f.sensitive ? MASK : v;
           } catch {
-            out[f.key] = '***';
+            out[f.key] = MASK;
           }
         } else {
           out[f.key] = dbRow.value;
@@ -53,7 +53,7 @@ export const settings = new Hono()
         // fallback: 读 .env 当前值
         const envVal = (env as unknown as Record<string, string>)[f.key];
         if (envVal) {
-          out[f.key] = f.sensitive ? '***' : envVal;
+          out[f.key] = f.sensitive ? MASK : envVal;
         }
       }
     }
@@ -62,7 +62,7 @@ export const settings = new Hono()
   .put('/', zValidator('json', updateSchema), async (c) => {
     const input = c.req.valid('json');
     for (const [key, value] of Object.entries(input)) {
-      if (!value || value === '***') continue; // 空或脱敏占位跳过
+      if (!value || value === MASK) continue; // 空或脱敏占位跳过
       const isSensitive = /key|secret|token|password/i.test(key);
       await prisma.settings.upsert({
         where: { key },
@@ -80,7 +80,7 @@ export const settings = new Hono()
     }
     return c.json({
       ok: true,
-      updated: Object.keys(input).filter((k) => input[k] && input[k] !== '***'),
+      updated: Object.keys(input).filter((k) => input[k] && input[k] !== MASK),
     });
   });
 
