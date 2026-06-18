@@ -12,7 +12,6 @@ import {
 } from 'lucide-react';
 import { useCallback, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { Button } from '@/components/ui/button';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -23,6 +22,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog';
+import { Button } from '@/components/ui/button';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -284,10 +284,7 @@ export function TasksPage() {
       )}
 
       {/* 删除确认 */}
-      <AlertDialog
-        open={!!deleteTarget}
-        onOpenChange={(open) => !open && setDeleteTarget(null)}
-      >
+      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>删除任务？</AlertDialogTitle>
@@ -349,12 +346,7 @@ function TaskCard({
 
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              aria-label="任务操作"
-              className="shrink-0"
-            >
+            <Button variant="ghost" size="icon-sm" aria-label="任务操作" className="shrink-0">
               <MoreHorizontal className="size-4" />
             </Button>
           </DropdownMenuTrigger>

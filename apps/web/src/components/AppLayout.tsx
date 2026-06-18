@@ -97,7 +97,8 @@ export function AppLayout() {
                     <Icon
                       size={17}
                       className={cn(
-                        !active && 'text-[var(--color-faint)] group-hover:text-[var(--color-muted)]',
+                        !active &&
+                          'text-[var(--color-faint)] group-hover:text-[var(--color-muted)]',
                       )}
                     />
                     {item.label}

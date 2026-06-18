@@ -11,7 +11,11 @@ export const AlertDialogOverlay = forwardRef<
   ElementRef<typeof AlertDialogPrimitive.Overlay>,
   ComponentPropsWithoutRef<typeof AlertDialogPrimitive.Overlay>
 >(({ className, ...props }, ref) => (
-  <AlertDialogPrimitive.Overlay ref={ref} className={cn(dialogOverlayClass, className)} {...props} />
+  <AlertDialogPrimitive.Overlay
+    ref={ref}
+    className={cn(dialogOverlayClass, className)}
+    {...props}
+  />
 ));
 AlertDialogOverlay.displayName = AlertDialogPrimitive.Overlay.displayName;
 

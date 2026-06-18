@@ -1,11 +1,9 @@
-@import "tailwindcss";
-
 /*
  * Shikigami · 和の間 (Washi) 亮色设计系统
  * 纸 · 墨 · 朱印。精致、克制、有手感。
  */
-
 @import url("https://fonts.googleapis.com/css2?family=Shippori+Mincho+B1:wght@500;600;700&family=Zen+Kaku+Gothic+New:wght@400;500;700;900&display=swap");
+@import "tailwindcss";
 
 @theme {
   /* 基础色阶: 和纸米白系 */

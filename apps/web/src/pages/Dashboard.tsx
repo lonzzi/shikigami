@@ -238,14 +238,16 @@ function downloadTone(s: string): 'success' | 'danger' | 'info' | 'warning' | 'n
 }
 function downloadLabel(s: string): string {
   return (
-    ({
-      DOWNLOADING: '下载中',
-      COMPLETED: '已完成',
-      ERROR: '错误',
-      PAUSED: '已暂停',
-      ABANDONED: '已放弃',
-      RENAMED: '已重命名',
-      PENDING: '等待中',
-    } as const)[s as 'DOWNLOADING'] ?? s
+    (
+      {
+        DOWNLOADING: '下载中',
+        COMPLETED: '已完成',
+        ERROR: '错误',
+        PAUSED: '已暂停',
+        ABANDONED: '已放弃',
+        RENAMED: '已重命名',
+        PENDING: '等待中',
+      } as const
+    )[s as 'DOWNLOADING'] ?? s
   );
 }

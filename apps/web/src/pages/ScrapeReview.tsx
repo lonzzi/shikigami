@@ -96,7 +96,10 @@ export function ScrapeReviewPage() {
               {preview.meta.episode_type && (
                 <Badge tone="neutral">{preview.meta.episode_type}</Badge>
               )}
-              <ConfidenceBadge confidence={preview.meta.confidence} needsReview={preview.meta.needs_review} />
+              <ConfidenceBadge
+                confidence={preview.meta.confidence}
+                needsReview={preview.meta.needs_review}
+              />
             </div>
             <div className="text-xs text-[var(--color-muted)]">
               {preview.meta.needs_review ? '⚠️ 置信度较低，建议人工核对' : '✓ 识别可信'}
@@ -108,7 +111,9 @@ export function ScrapeReviewPage() {
       {/* 待确认队列 */}
       <div>
         <div className="mb-3 flex items-center gap-2">
-          <h2 className="font-display text-base font-semibold text-[var(--color-ink)]">待人工确认</h2>
+          <h2 className="font-display text-base font-semibold text-[var(--color-ink)]">
+            待人工确认
+          </h2>
           <Badge tone={data && data.length > 0 ? 'warning' : 'neutral'}>{data?.length ?? 0}</Badge>
         </div>
         {data && data.length === 0 ? (
@@ -178,7 +183,10 @@ function ConfidenceBadge({
   const c = confidence ?? 0;
   const tone = c >= 0.7 ? 'success' : c >= 0.5 ? 'warning' : 'danger';
   return (
-    <Badge tone={tone as 'success' | 'warning' | 'danger'} title={needsReview ? '需人工核对' : undefined}>
+    <Badge
+      tone={tone as 'success' | 'warning' | 'danger'}
+      title={needsReview ? '需人工核对' : undefined}
+    >
       置信 {c.toFixed(2)}
     </Badge>
   );

@@ -53,7 +53,11 @@ export function LibraryPage() {
       ) : (
         <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
           {data?.map((s, i) => (
-            <Card key={s.id} className="stagger group flex flex-col overflow-hidden p-0" style={{ ['--i' as string]: i }}>
+            <Card
+              key={s.id}
+              className="stagger group flex flex-col overflow-hidden p-0"
+              style={{ ['--i' as string]: i }}
+            >
               {/* 海报 */}
               <div className="relative aspect-[2/3] w-full overflow-hidden bg-gradient-to-br from-[var(--color-sakura-soft)] to-[var(--color-primary-soft)]">
                 {s.posterUrl ? (
@@ -68,7 +72,14 @@ export function LibraryPage() {
                   </div>
                 )}
                 <div className="absolute left-2.5 top-2.5 flex flex-wrap gap-1.5">
-                  {s.year && <Badge tone="neutral" className="bg-[var(--color-ink)]/70 text-white backdrop-blur-sm">{s.year}</Badge>}
+                  {s.year && (
+                    <Badge
+                      tone="neutral"
+                      className="bg-[var(--color-ink)]/70 text-white backdrop-blur-sm"
+                    >
+                      {s.year}
+                    </Badge>
+                  )}
                 </div>
               </div>
 
@@ -78,7 +89,9 @@ export function LibraryPage() {
                   {s.titleCn ?? s.titleJp}
                 </div>
                 {s.titleCn && (
-                  <div className="mt-0.5 truncate text-xs text-[var(--color-muted)]">{s.titleJp}</div>
+                  <div className="mt-0.5 truncate text-xs text-[var(--color-muted)]">
+                    {s.titleJp}
+                  </div>
                 )}
                 <div className="mt-2 flex items-center gap-1.5">
                   <Badge tone="info">{s._count?.mediaFiles ?? 0} 集</Badge>
