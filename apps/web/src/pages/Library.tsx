@@ -100,7 +100,19 @@ export function LibraryPage() {
                       {s.year}
                     </Badge>
                   )}
-                  {!s.tmdbId && (
+                  {s.tmdbId ? (
+                    <a
+                      href={`https://www.themoviedb.org/tv/${s.tmdbId}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      title="在 TMDB 查看"
+                      className="inline-flex"
+                    >
+                      <Badge tone="success" className="backdrop-blur-sm">
+                        TMDB ↗
+                      </Badge>
+                    </a>
+                  ) : (
                     <Badge tone="warning" className="backdrop-blur-sm">
                       未绑 TMDB
                     </Badge>

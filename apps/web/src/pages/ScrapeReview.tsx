@@ -153,7 +153,15 @@ export function ScrapeReviewPage() {
                               {f.series.year ? ` · ${f.series.year}` : ''}
                             </Badge>
                             {f.series.tmdbId ? (
-                              <Badge tone="success">TMDB 已绑</Badge>
+                              <a
+                                href={`https://www.themoviedb.org/tv/${f.series.tmdbId}`}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="inline-flex"
+                                title="在 TMDB 查看"
+                              >
+                                <Badge tone="success">TMDB ↗</Badge>
+                              </a>
                             ) : (
                               <Badge tone="neutral">未绑 TMDB</Badge>
                             )}
