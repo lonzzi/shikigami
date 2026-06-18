@@ -27,7 +27,9 @@ const updateSchema = z.record(z.string(), z.string());
 export const settings = new Hono()
   .get('/', async (c) => {
     const rows = await prisma.settings.findMany();
-    const dbMap = new Map(rows.map((r) => [r.key, r]));
+    const dbMap = new Map<string, { value: string; encrypted: boolean }>(
+      rows.map((r) => [r.key, { value: r.value, encrypted: r.encrypted }]),
+    );
     const out: Record<string, string> = {};
 
     for (const f of DISPLAY_FIELDS) {
