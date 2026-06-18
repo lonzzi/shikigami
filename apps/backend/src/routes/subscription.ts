@@ -46,14 +46,14 @@ export const subscription = new Hono()
     let result = list;
     if (search) {
       result = result.filter(
-        (s) =>
+        (s: (typeof list)[number]) =>
           s.name.toLowerCase().includes(search) ||
           (s.series?.titleCn?.toLowerCase().includes(search) ?? false) ||
           (s.series?.titleJp.toLowerCase().includes(search) ?? false),
       );
     }
-    if (onlyLinked) result = result.filter((s) => s.seriesId);
-    if (onlyUnlinked) result = result.filter((s) => !s.seriesId);
+    if (onlyLinked) result = result.filter((s: (typeof list)[number]) => s.seriesId);
+    if (onlyUnlinked) result = result.filter((s: (typeof list)[number]) => !s.seriesId);
     return c.json(result);
   })
   .post('/', zValidator('json', createSchema), async (c) => {
