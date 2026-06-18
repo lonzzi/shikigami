@@ -16,10 +16,7 @@ type Metrics = {
     torrentsCount: number | null;
     freeSpaceBytes: string | null;
   };
-  disk: {
-    downloads: { usedRatio: number; freeBytes: string; totalBytes: string } | null;
-    library: { usedRatio: number; freeBytes: string; totalBytes: string } | null;
-  };
+  disk: { freeBytes: string | null };
 };
 
 export function DashboardPage() {
@@ -91,7 +88,6 @@ export function DashboardPage() {
           <dl className="space-y-3">
             <Row label="版本" value={m.qbittorrent.appVersion ?? '-'} />
             <Row label="种子数" value={m.qbittorrent.torrentsCount ?? '-'} />
-            <Row label="剩余空间" value={formatBytes(m.qbittorrent.freeSpaceBytes)} />
           </dl>
         </Card>
 
@@ -133,11 +129,10 @@ export function DashboardPage() {
 
         {/* 磁盘 */}
         <Card>
-          <SectionTitle icon={HardDrive} title="磁盘占用" />
-          <div className="space-y-4">
-            <DiskBar label="下载盘" data={m.disk.downloads} />
-            <DiskBar label="媒体库" data={m.disk.library} />
-          </div>
+          <SectionTitle icon={HardDrive} title="磁盘" />
+          <dl className="space-y-3">
+            <Row label="剩余空间" value={formatBytes(m.disk.freeBytes)} />
+          </dl>
         </Card>
       </div>
     </div>
@@ -211,35 +206,6 @@ function Row({ label, value }: { label: string; value: string | number }) {
 
 function EmptyLine({ text }: { text: string }) {
   return <div className="py-2 text-sm text-[var(--color-faint)]">{text}</div>;
-}
-
-function DiskBar({
-  label,
-  data,
-}: {
-  label: string;
-  data?: { usedRatio?: number; freeBytes?: string } | null;
-}) {
-  if (!data) return <EmptyLine text={`${label}：不可用`} />;
-  const pct = Math.round((data.usedRatio ?? 0) * 100);
-  const tone =
-    pct > 90 ? 'var(--color-danger)' : pct > 75 ? 'var(--color-warning)' : 'var(--color-primary)';
-  return (
-    <div>
-      <div className="mb-1.5 flex justify-between text-sm">
-        <span className="text-[var(--color-text-soft)]">{label}</span>
-        <span className="text-[var(--color-muted)]">
-          {pct}% · 剩余 {formatBytes(data.freeBytes)}
-        </span>
-      </div>
-      <div className="h-2 overflow-hidden rounded-full bg-[var(--color-surface-2)]">
-        <div
-          className="h-full rounded-full transition-all duration-500"
-          style={{ width: `${Math.min(100, pct)}%`, background: tone }}
-        />
-      </div>
-    </div>
-  );
 }
 
 function jobTone(s: string): 'success' | 'danger' | 'info' | 'neutral' {

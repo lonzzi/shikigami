@@ -1,21 +1,17 @@
 import { getStatus } from './downloader/qbittorrent';
-import { env } from './lib/env';
 import { prisma } from './lib/prisma';
-import { diskUsage } from './lib/statvfs';
 import { queueDepths } from './scheduler/queues';
 
 /**
  * 仪表盘 metrics 聚合。
- * 队列深度 / 抓取成功率 / qB 状态 / 磁盘占用。
+ * 队列深度 / 抓取成功率 / qB 状态 / 磁盘剩余(qB server_state.free_space)。
  */
 export async function getMetrics() {
-  const [downloads, pendingScrape, completedMedia, qbStatus, dl, lib] = await Promise.all([
+  const [downloads, pendingScrape, completedMedia, qbStatus] = await Promise.all([
     prisma.downloadTask.groupBy({ by: ['status'], _count: true }),
     prisma.mediaFile.count({ where: { scrapeState: { in: ['PENDING', 'MATCHED'] } } }),
     prisma.mediaFile.count({ where: { scrapeState: 'RENAMED' } }),
     getStatus(),
-    diskUsage(env.DOWNLOADS_ROOT),
-    diskUsage(env.LIBRARY_ROOT),
   ]);
 
   const jobs = await prisma.jobRun.groupBy({ by: ['status'], _count: true });
@@ -27,6 +23,9 @@ export async function getMetrics() {
 
   const downloadsByStatus: Record<string, number> = {};
   for (const d of downloads) downloadsByStatus[d.status] = d._count;
+
+  // qB 的 free_space 是其保存路径(下载盘)的剩余空间, 媒体库同盘(/ssd)共享
+  const freeBytes = qbStatus.freeSpaceBytes?.toString() ?? null;
 
   return {
     queue: queueDepths(),
@@ -43,23 +42,10 @@ export async function getMetrics() {
       connected: qbStatus.connected,
       appVersion: qbStatus.appVersion,
       torrentsCount: qbStatus.torrentsCount,
-      freeSpaceBytes: qbStatus.freeSpaceBytes?.toString() ?? null,
+      freeSpaceBytes: freeBytes,
     },
     disk: {
-      downloads: dl
-        ? {
-            usedRatio: dl.usedRatio,
-            freeBytes: dl.freeBytes.toString(),
-            totalBytes: dl.totalBytes.toString(),
-          }
-        : null,
-      library: lib
-        ? {
-            usedRatio: lib.usedRatio,
-            freeBytes: lib.freeBytes.toString(),
-            totalBytes: lib.totalBytes.toString(),
-          }
-        : null,
+      freeBytes,
     },
   };
 }

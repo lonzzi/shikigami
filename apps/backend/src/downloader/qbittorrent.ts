@@ -22,7 +22,7 @@ import { QBittorrent } from '@ctrl/qbittorrent';
 
 import { env } from '../lib/env';
 import { RetryableError } from '../lib/errors';
-import { addMagnetDirect, torrentExists } from '../lib/qb-direct';
+import { addMagnetDirect, getServerState, torrentExists } from '../lib/qb-direct';
 import { logger } from '../logger';
 import { parseInfoHash } from '../scrapers/types';
 
@@ -186,26 +186,23 @@ export async function resumeTorrent(hash: string): Promise<boolean> {
 /**
  * 聚合 qBittorrent 连接状态（供 GET /api/qb/status 与 readiness 探针）。
  * 任一子调用失败即视为离线，返回 connected=false 而非抛错（API 层需要稳定响应）。
+ * server_state(free_space/torrents) 走 qb-direct(直接 SID, 绕过 @ctrl cookie 问题)。
  */
 export async function getStatus(): Promise<QbStatus> {
   try {
     const c = client();
-    const [appVersion, apiVersion, mainData] = await Promise.all([
+    const [appVersion, apiVersion, serverState] = await Promise.all([
       c.getAppVersion(),
       c.getApiVersion(),
-      c.getSyncMainData(),
+      getServerState(),
     ]);
     _lastConnectOk = true;
-    const freeSpaceRaw = mainData?.server_state?.free_space;
-    // server_state 类型为 Record<string, unknown>，free_space 在 WebAPI 里是数字字符串
-    const freeSpaceBytes =
-      freeSpaceRaw != null && freeSpaceRaw !== '' ? BigInt(String(freeSpaceRaw)) : null;
     return {
       connected: true,
       appVersion,
       apiVersion,
-      freeSpaceBytes,
-      torrentsCount: mainData?.torrents ? Object.keys(mainData.torrents).length : 0,
+      freeSpaceBytes: serverState?.freeSpaceBytes ?? null,
+      torrentsCount: serverState?.torrentsCount ?? null,
     };
   } catch (e) {
     _lastConnectOk = false;
