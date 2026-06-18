@@ -1,9 +1,11 @@
 @import "tailwindcss";
 
 /*
- * Shikigami · 和纸(Washi)亮色设计系统
- * 设计原则: 柔和层次、精致间距、克制的朱/桜点缀、和纸质感背景
+ * Shikigami · 和の間 (Washi) 亮色设计系统
+ * 纸 · 墨 · 朱印。精致、克制、有手感。
  */
+
+@import url("https://fonts.googleapis.com/css2?family=Shippori+Mincho+B1:wght@500;600;700&family=Zen+Kaku+Gothic+New:wght@400;500;700;900&display=swap");
 
 @theme {
   /* 基础色阶: 和纸米白系 */
@@ -12,17 +14,18 @@
   --color-surface-2: oklch(0.97 0.005 85);
   --color-surface-3: oklch(0.94 0.008 85);
 
-  /* 边框: 极淡,靠阴影区分层次而非生硬边线 */
+  /* 边框 */
   --color-border: oklch(0.91 0.006 85);
   --color-border-strong: oklch(0.84 0.01 85);
 
-  /* 文字: 墨色层次 */
+  /* 文字: 墨色层次（新增 ink 近黑用于明朝大标题）*/
+  --color-ink: oklch(0.18 0.012 60);
   --color-text: oklch(0.24 0.015 60);
   --color-text-soft: oklch(0.4 0.015 60);
   --color-muted: oklch(0.58 0.012 60);
   --color-faint: oklch(0.72 0.01 60);
 
-  /* 品牌: 朱色(神社朱红),克制使用 */
+  /* 品牌: 朱色（神社朱红）*/
   --color-primary: oklch(0.56 0.2 27);
   --color-primary-soft: oklch(0.94 0.04 27);
   --color-primary-hover: oklch(0.5 0.2 27);
@@ -42,6 +45,12 @@
   --color-info: oklch(0.55 0.12 240);
   --color-info-soft: oklch(0.95 0.04 240);
 
+  /* 字体族 */
+  --font-display: "Shippori Mincho B1", "Yu Mincho", "Songti SC", "Noto Serif JP", serif;
+  --font-sans: "Zen Kaku Gothic New", ui-sans-serif, system-ui, -apple-system, "PingFang SC",
+    "Hiragino Sans", "Microsoft YaHei", sans-serif;
+  --font-mono: ui-monospace, "SFMono-Regular", "Menlo", "Consolas", monospace;
+
   /* 阴影: 柔和多层,和纸浮起感 */
   --shadow-xs: 0 1px 2px oklch(0.3 0.01 85 / 0.04);
   --shadow-sm: 0 1px 3px oklch(0.3 0.01 85 / 0.06), 0 1px 2px oklch(0.3 0.01 85 / 0.04);
@@ -55,21 +64,22 @@
   --radius-xl: 18px;
 }
 
-html, body, #root {
+html,
+body,
+#root {
   height: 100%;
 }
 
 body {
   margin: 0;
-  /* 和纸质感: 双向暖色径向渐变,极淡 */
   background:
     radial-gradient(ellipse 80% 50% at 50% -10%, oklch(0.96 0.015 350 / 0.5), transparent),
     radial-gradient(ellipse 60% 40% at 100% 100%, oklch(0.95 0.02 85 / 0.6), transparent),
     var(--color-bg);
   background-attachment: fixed;
   color: var(--color-text);
-  font-family: "Inter", ui-sans-serif, system-ui, -apple-system, "PingFang SC", "Hiragino Sans", "Microsoft YaHei", sans-serif;
-  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  font-family: var(--font-sans);
+  font-feature-settings: "cv02", "cv03", "cv11";
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   letter-spacing: -0.005em;
@@ -79,10 +89,28 @@ body {
   border-color: var(--color-border);
 }
 
+/* 和纸纹理叠层: 极淡 feTurbulence 颗粒, 固定全屏, 不挡事件 */
+.washi-grain {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.025;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* 字体工具类 */
+.font-display {
+  font-family: var(--font-display);
+}
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+
 /* 毛笔/明朝体 logo */
 .brush {
-  font-family: "Yu Mincho", "YuMincho", "Hiragino Mincho ProN", "Songti SC", "STSong", "Noto Serif JP", serif;
-  font-weight: 600;
+  font-family: var(--font-display);
+  font-weight: 700;
 }
 
 /* 印章风: 朱底白字方块 */
@@ -90,13 +118,14 @@ body {
   background: linear-gradient(135deg, oklch(0.58 0.2 27), oklch(0.52 0.2 27));
   color: white;
   border-radius: var(--radius-sm);
-  font-family: "Yu Mincho", "Songti SC", "Noto Serif JP", serif;
+  font-family: var(--font-display);
   letter-spacing: 0.05em;
   box-shadow: var(--shadow-sm), inset 0 1px 0 oklch(1 0 0 / 0.2);
 }
 
 /* 卡片: 柔和浮起 */
 .card {
+  position: relative;
   background: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg);
@@ -106,28 +135,109 @@ body {
 .card-hover:hover {
   box-shadow: var(--shadow-md);
   border-color: var(--color-border-strong);
+  transform: translateY(-1px);
 }
 
 /* 输入聚焦: 朱色细环 */
-input:focus-visible, textarea:focus-visible, select:focus-visible {
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
   outline: none;
   border-color: var(--color-primary) !important;
   box-shadow: 0 0 0 3px oklch(0.56 0.2 27 / 0.12) !important;
 }
 
 /* 滚动条 */
-::-webkit-scrollbar { width: 10px; height: 10px; }
-::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
 ::-webkit-scrollbar-thumb {
   background: oklch(0.85 0.01 85);
   border-radius: 8px;
   border: 2px solid var(--color-bg);
 }
-::-webkit-scrollbar-thumb:hover { background: var(--color-faint); }
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-faint);
+}
 
 /* 动效 */
-@keyframes fade-in { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
-.fade-in { animation: fade-in 0.25s ease-out; }
+@keyframes fade-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.fade-in {
+  animation: fade-in 0.35s ease-out both;
+}
+/* 错峰载入: 在卡片上加 .stagger, 用 inline style --i 控制延迟 */
+.stagger {
+  animation: fade-in 0.4s ease-out both;
+  animation-delay: calc(var(--i, 0) * 45ms);
+}
 
-@keyframes spin { to { transform: rotate(360deg); } }
-.spin { animation: spin 0.8s linear infinite; }
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+.spin {
+  animation: spin 0.8s linear infinite;
+}
+
+/* Radix 动画 keyframes */
+@keyframes overlay-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes content-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+@keyframes dropdown-in {
+  from {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+/* 尊重 reduced-motion */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
+
+/* ===== Sonner toast: washi 主题 ===== */
+.sonner-toast {
+  font-family: var(--font-sans);
+  border-radius: var(--radius) !important;
+  border: 1px solid var(--color-border) !important;
+  box-shadow: var(--shadow-lg) !important;
+}

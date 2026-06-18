@@ -31,7 +31,7 @@ export function Badge({
   return (
     <span
       className={cn(
-        'inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium',
+        'inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium tnum',
         tones[tone],
         className,
       )}
@@ -61,7 +61,7 @@ export const Label = ({ className, ...props }: HTMLAttributes<HTMLLabelElement>)
   />
 );
 
-/** 区块标题 + 可选操作区 */
+/** 区块标题 + 可选操作区（标题用明朝 display）*/
 export function SectionHeader({
   title,
   desc,
@@ -72,9 +72,11 @@ export function SectionHeader({
   action?: ReactNode;
 }) {
   return (
-    <div className="mb-4 flex items-end justify-between gap-4">
+    <div className="mb-5 flex items-end justify-between gap-4">
       <div>
-        <h1 className="text-xl font-semibold tracking-tight text-[var(--color-text)]">{title}</h1>
+        <h1 className="font-display text-[1.6rem] font-semibold tracking-tight text-[var(--color-ink)]">
+          {title}
+        </h1>
         {desc && <p className="mt-1 text-sm text-[var(--color-muted)]">{desc}</p>}
       </div>
       {action}
@@ -95,7 +97,7 @@ export function EmptyState({
   action?: ReactNode;
 }) {
   return (
-    <div className="fade-in flex flex-col items-center justify-center py-16 text-center">
+    <div className="flex flex-col items-center justify-center py-16 text-center">
       <div className="flex size-16 items-center justify-center rounded-2xl bg-[var(--color-surface-2)] text-[var(--color-faint)]">
         <Icon className="size-8" />
       </div>
