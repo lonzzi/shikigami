@@ -186,10 +186,10 @@ export async function getServerState(): Promise<{
     const res = await qbFetch('/api/v2/sync/maindata');
     if (!res.ok) return null;
     const data = (await res.json()) as {
-      server_state?: { free_space?: string | number };
+      server_state?: { free_space_on_disk?: string | number; free_space?: string | number };
       torrents?: Record<string, unknown>;
     };
-    const freeRaw = data.server_state?.free_space;
+    const freeRaw = data.server_state?.free_space_on_disk ?? data.server_state?.free_space;
     return {
       freeSpaceBytes: freeRaw != null && freeRaw !== '' ? BigInt(String(freeRaw)) : null,
       torrentsCount: data.torrents ? Object.keys(data.torrents).length : 0,

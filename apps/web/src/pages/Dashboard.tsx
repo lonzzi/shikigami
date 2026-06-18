@@ -131,7 +131,10 @@ export function DashboardPage() {
         <Card>
           <SectionTitle icon={HardDrive} title="磁盘" />
           <dl className="space-y-3">
-            <Row label="剩余空间" value={formatBytes(m.disk.freeBytes)} />
+            <Row
+              label="剩余空间"
+              value={m.qbittorrent.connected ? formatBytes(m.disk.freeBytes) : '未连接'}
+            />
           </dl>
         </Card>
       </div>

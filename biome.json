@@ -20,6 +20,7 @@
       "!**/generated",
       "!.prisma",
       "!**/public",
+      "!.claude",
       "!**/pnpm-lock.yaml",
       "!**/data",
       "!**/coverage"

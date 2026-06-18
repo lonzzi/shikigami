@@ -15,26 +15,21 @@ const FIELDS: {
 }[] = [
   {
     key: 'LLM_BASE_URL',
-    label: 'Base URL',
+    label: 'API 地址',
     group: 'AI 刮削',
     placeholder: 'https://api.openai.com/v1',
   },
   { key: 'LLM_API_KEY', label: 'API Key', group: 'AI 刮削', secret: true, placeholder: 'sk-...' },
-  { key: 'LLM_MODEL', label: '模型', group: 'AI 刮削', placeholder: 'gpt-4o-mini' },
+  { key: 'LLM_MODEL', label: '模型', group: 'AI 刮削', placeholder: 'glm-5.1' },
   {
     key: 'QBT_BASE_URL',
     label: 'qBittorrent 地址',
     group: '下载器',
-    placeholder: 'http://qbittorrent:8080',
+    placeholder: 'http://localhost:16280',
   },
   { key: 'QBT_USERNAME', label: '用户名', group: '下载器' },
   { key: 'QBT_PASSWORD', label: '密码', group: '下载器', secret: true },
-  { key: 'JELLYFIN_BASE_URL', label: 'Jellyfin 地址', group: '媒体服务器' },
-  { key: 'JELLYFIN_API_KEY', label: 'Jellyfin API Key', group: '媒体服务器', secret: true },
-  { key: 'BANGUMI_ACCESS_TOKEN', label: 'Bangumi Token', group: '元数据', secret: true },
   { key: 'TMDB_API_KEY', label: 'TMDB API Key', group: '元数据', secret: true },
-  { key: 'TELEGRAM_BOT_TOKEN', label: 'Telegram Bot Token', group: '通知', secret: true },
-  { key: 'TELEGRAM_CHAT_ID', label: 'Telegram Chat ID', group: '通知' },
 ];
 
 const GROUPS = [...new Set(FIELDS.map((f) => f.group))];
@@ -50,7 +45,10 @@ export function SettingsPage() {
   useEffect(() => {
     if (data) {
       const init: Record<string, string> = {};
-      for (const f of FIELDS) init[f.key] = data[f.key] === '***' ? '' : (data[f.key] ?? '');
+      for (const f of FIELDS) {
+        const v = data[f.key];
+        init[f.key] = v ?? '';
+      }
       setForm(init);
     }
   }, [data]);
@@ -81,7 +79,7 @@ export function SettingsPage() {
     <div className="space-y-6">
       <SectionHeader
         title="设置"
-        desc="敏感字段加密存储，留空表示不修改"
+        desc="当前配置从 .env 读取，修改后写入数据库覆盖"
         action={
           <Button loading={save.isPending} onClick={() => save.mutate()}>
             <Save className="size-4" /> 保存
@@ -104,7 +102,7 @@ export function SettingsPage() {
                     value={form[f.key] ?? ''}
                     onChange={(e) => setForm((prev) => ({ ...prev, [f.key]: e.target.value }))}
                     placeholder={
-                      f.placeholder ?? (data?.[f.key] === '***' ? '••••••（已设置，留空不改）' : '')
+                      f.placeholder ?? (data?.[f.key] === '***' ? '••••（已设置，留空不改）' : '')
                     }
                   />
                 </div>
@@ -113,10 +111,6 @@ export function SettingsPage() {
           </Card>
         ))}
       </div>
-
-      <p className="text-xs text-[var(--color-faint)]">
-        密钥类字段加密落库。部分配置（如 qBittorrent 连接）修改后需重启后端生效。
-      </p>
     </div>
   );
 }
