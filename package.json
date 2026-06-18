@@ -24,7 +24,7 @@
   },
   "simple-git-hooks": {
     "pre-commit": "pnpm exec biome check --staged .",
-    "pre-push": "pnpm typecheck"
+    "pre-push": "pnpm check && pnpm typecheck && pnpm test"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.0",
