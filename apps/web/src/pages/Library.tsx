@@ -51,48 +51,57 @@ export function LibraryPage() {
           />
         </Card>
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {data?.map((s) => (
-            <Card key={s.id} className="space-y-3">
-              <div className="flex gap-3">
-                <div className="flex size-20 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-gradient-to-br from-[var(--color-sakura-soft)] to-[var(--color-primary-soft)]">
-                  {s.posterUrl ? (
-                    <img src={s.posterUrl} alt="" className="size-full object-cover" />
-                  ) : (
-                    <Film className="size-7 text-[var(--color-primary)]" />
-                  )}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="truncate font-medium text-[var(--color-text)]">
-                    {s.titleCn ?? s.titleJp}
+        <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          {data?.map((s, i) => (
+            <Card key={s.id} className="stagger group flex flex-col overflow-hidden p-0" style={{ ['--i' as string]: i }}>
+              {/* 海报 */}
+              <div className="relative aspect-[2/3] w-full overflow-hidden bg-gradient-to-br from-[var(--color-sakura-soft)] to-[var(--color-primary-soft)]">
+                {s.posterUrl ? (
+                  <img
+                    src={s.posterUrl}
+                    alt={s.titleCn ?? s.titleJp}
+                    className="size-full object-cover transition-transform duration-300 group-hover:scale-[1.03]"
+                  />
+                ) : (
+                  <div className="flex size-full items-center justify-center">
+                    <Film className="size-10 text-[var(--color-primary)]/40" />
                   </div>
-                  {s.titleCn && (
-                    <div className="mt-0.5 truncate text-xs text-[var(--color-muted)]">
-                      {s.titleJp}
-                    </div>
-                  )}
-                  <div className="mt-2 flex flex-wrap gap-1.5">
-                    {s.year && <Badge tone="neutral">{s.year}</Badge>}
-                    <Badge tone="info">{s._count?.mediaFiles ?? 0} 集</Badge>
-                  </div>
+                )}
+                <div className="absolute left-2.5 top-2.5 flex flex-wrap gap-1.5">
+                  {s.year && <Badge tone="neutral" className="bg-[var(--color-ink)]/70 text-white backdrop-blur-sm">{s.year}</Badge>}
                 </div>
               </div>
-              <div className="flex gap-2 border-t border-[var(--color-border)] pt-3">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  loading={rescrape.isPending}
-                  onClick={() => rescrape.mutate({ id: s.id, force: false })}
-                >
-                  <RefreshCw className="size-3.5" /> 重新刮削
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => rescrape.mutate({ id: s.id, force: true })}
-                >
-                  强制覆盖
-                </Button>
+
+              {/* 信息 */}
+              <div className="flex flex-1 flex-col p-3.5">
+                <div className="truncate font-display text-[0.95rem] font-semibold text-[var(--color-ink)]">
+                  {s.titleCn ?? s.titleJp}
+                </div>
+                {s.titleCn && (
+                  <div className="mt-0.5 truncate text-xs text-[var(--color-muted)]">{s.titleJp}</div>
+                )}
+                <div className="mt-2 flex items-center gap-1.5">
+                  <Badge tone="info">{s._count?.mediaFiles ?? 0} 集</Badge>
+                </div>
+
+                <div className="mt-auto flex gap-1.5 pt-3">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="flex-1"
+                    loading={rescrape.isPending}
+                    onClick={() => rescrape.mutate({ id: s.id, force: false })}
+                  >
+                    <RefreshCw className="size-3.5" /> 重新刮削
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => rescrape.mutate({ id: s.id, force: true })}
+                  >
+                    强制
+                  </Button>
+                </div>
               </div>
             </Card>
           ))}

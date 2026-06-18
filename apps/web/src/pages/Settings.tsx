@@ -3,7 +3,8 @@ import { Save } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
-import { Card, Input, Label, SectionHeader } from '@/components/ui/primitives';
+import { Input, Label, SectionHeader } from '@/components/ui/primitives';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { rpc } from '@/lib/api';
 
 const FIELDS: {
@@ -87,30 +88,41 @@ export function SettingsPage() {
         }
       />
 
-      <div className="space-y-4">
-        {GROUPS.map((g) => (
-          <Card key={g} className="space-y-4">
-            <h2 className="text-sm font-semibold uppercase tracking-wide text-[var(--color-text-soft)]">
+      <Tabs defaultValue={GROUPS[0]}>
+        <TabsList>
+          {GROUPS.map((g) => (
+            <TabsTrigger key={g} value={g}>
               {g}
-            </h2>
-            <div className="grid gap-4 sm:grid-cols-2">
-              {FIELDS.filter((f) => f.group === g).map((f) => (
-                <div key={f.key}>
-                  <Label>{f.label}</Label>
-                  <Input
-                    type={f.secret ? 'password' : 'text'}
-                    value={form[f.key] ?? ''}
-                    onChange={(e) => setForm((prev) => ({ ...prev, [f.key]: e.target.value }))}
-                    placeholder={
-                      f.placeholder ?? (data?.[f.key] === '***' ? '••••（已设置，留空不改）' : '')
-                    }
-                  />
-                </div>
-              ))}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+
+        {GROUPS.map((g) => (
+          <TabsContent key={g} value={g}>
+            <div className="card p-5">
+              <div className="grid gap-4 sm:grid-cols-2">
+                {FIELDS.filter((f) => f.group === g).map((f) => (
+                  <div key={f.key}>
+                    <Label>{f.label}</Label>
+                    <Input
+                      type={f.secret ? 'password' : 'text'}
+                      value={form[f.key] ?? ''}
+                      onChange={(e) => setForm((prev) => ({ ...prev, [f.key]: e.target.value }))}
+                      placeholder={
+                        f.placeholder ?? (data?.[f.key] === '***' ? '••••（已设置，留空不改）' : '')
+                      }
+                    />
+                  </div>
+                ))}
+              </div>
             </div>
-          </Card>
+          </TabsContent>
         ))}
-      </div>
+      </Tabs>
+
+      <p className="text-xs text-[var(--color-faint)]">
+        密钥类字段加密落库。部分配置（如 qBittorrent 连接）修改后需重启后端生效。
+      </p>
     </div>
   );
 }

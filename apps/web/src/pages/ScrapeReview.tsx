@@ -59,13 +59,13 @@ export function ScrapeReviewPage() {
       <SectionHeader title="刮削确认" desc="AI 识别置信度低或失败的文件，需人工确认" />
 
       {/* 试刮削 */}
-      <Card className="space-y-3">
+      <Card className="space-y-4">
         <div className="flex items-center gap-2 text-sm font-medium text-[var(--color-text)]">
           <Wand2 className="size-4 text-[var(--color-primary)]" /> 试刮削
         </div>
         <div className="flex gap-2">
           <Input
-            className="flex-1"
+            className="flex-1 font-mono text-xs"
             value={filename}
             onChange={(e) => setFilename(e.target.value)}
             placeholder="[ANi] Sousou no Frieren - 01 [1080p][CHT].mkv"
@@ -79,7 +79,7 @@ export function ScrapeReviewPage() {
           </Button>
         </div>
         {preview?.meta && (
-          <div className="rounded-lg bg-[var(--color-surface-2)] p-4">
+          <div className="rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-surface-2)] p-4">
             <div className="mb-3 flex flex-wrap gap-1.5">
               {preview.meta.release_group && (
                 <Badge tone="primary">{preview.meta.release_group}</Badge>
@@ -96,9 +96,7 @@ export function ScrapeReviewPage() {
               {preview.meta.episode_type && (
                 <Badge tone="neutral">{preview.meta.episode_type}</Badge>
               )}
-              <Badge tone={preview.meta.needs_review ? 'warning' : 'success'}>
-                置信 {(preview.meta.confidence ?? 0).toFixed(2)}
-              </Badge>
+              <ConfidenceBadge confidence={preview.meta.confidence} needsReview={preview.meta.needs_review} />
             </div>
             <div className="text-xs text-[var(--color-muted)]">
               {preview.meta.needs_review ? '⚠️ 置信度较低，建议人工核对' : '✓ 识别可信'}
@@ -110,7 +108,7 @@ export function ScrapeReviewPage() {
       {/* 待确认队列 */}
       <div>
         <div className="mb-3 flex items-center gap-2">
-          <h2 className="font-medium text-[var(--color-text)]">待人工确认</h2>
+          <h2 className="font-display text-base font-semibold text-[var(--color-ink)]">待人工确认</h2>
           <Badge tone={data && data.length > 0 ? 'warning' : 'neutral'}>{data?.length ?? 0}</Badge>
         </div>
         {data && data.length === 0 ? (
@@ -123,13 +121,13 @@ export function ScrapeReviewPage() {
           </Card>
         ) : (
           <div className="space-y-3">
-            {data?.map((f) => {
+            {data?.map((f, i) => {
               const meta = f.scrapeResult ? JSON.parse(f.scrapeResult) : null;
               return (
-                <Card key={f.id} className="space-y-3">
+                <Card key={f.id} className="stagger space-y-3" style={{ ['--i' as string]: i }}>
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
-                      <div className="truncate font-mono text-sm text-[var(--color-text)]">
+                      <div className="break-all font-mono text-sm text-[var(--color-text)]">
                         {f.fileName}
                       </div>
                       <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-[var(--color-muted)]">
@@ -145,9 +143,7 @@ export function ScrapeReviewPage() {
                             <Badge tone="neutral">ABS {meta.absolute_episode}</Badge>
                           )}
                           {meta.resolution && <Badge tone="neutral">{meta.resolution}</Badge>}
-                          <Badge tone={meta.confidence < 0.5 ? 'danger' : 'warning'}>
-                            置信 {(meta.confidence ?? 0).toFixed(2)}
-                          </Badge>
+                          <ConfidenceBadge confidence={meta.confidence} />
                         </div>
                       )}
                     </div>
@@ -168,5 +164,22 @@ export function ScrapeReviewPage() {
         )}
       </div>
     </div>
+  );
+}
+
+/** 置信度徽章：≥0.7 绿、0.5–0.7 黄、<0.5 红，附可视化条。 */
+function ConfidenceBadge({
+  confidence,
+  needsReview,
+}: {
+  confidence?: number;
+  needsReview?: boolean;
+}) {
+  const c = confidence ?? 0;
+  const tone = c >= 0.7 ? 'success' : c >= 0.5 ? 'warning' : 'danger';
+  return (
+    <Badge tone={tone as 'success' | 'warning' | 'danger'} title={needsReview ? '需人工核对' : undefined}>
+      置信 {c.toFixed(2)}
+    </Badge>
   );
 }
