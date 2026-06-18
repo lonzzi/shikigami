@@ -2,7 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Activity, Database, HardDrive, Magnet, Sparkles, TrendingUp } from 'lucide-react';
 import { Badge, Card, LoadingState } from '@/components/ui/primitives';
 import { rpc } from '@/lib/api';
-import { formatBytes } from '@/lib/utils';
+import { cn, formatBytes } from '@/lib/utils';
 
 type Metrics = {
   queue: { import: number; scrape: number };
@@ -34,48 +34,55 @@ export function DashboardPage() {
 
   const queueTotal = (m.queue.import ?? 0) + (m.queue.scrape ?? 0);
 
+  const stats = [
+    {
+      icon: Activity,
+      label: '队列任务',
+      value: queueTotal,
+      sub: `导入 ${m.queue.import} · 刮削 ${m.queue.scrape}`,
+      tone: 'info' as const,
+    },
+    {
+      icon: Sparkles,
+      label: '待刮削',
+      value: m.pendingScrape,
+      sub: '等待 AI 识别',
+      tone: (m.pendingScrape > 0 ? 'warning' : 'neutral') as 'warning' | 'neutral',
+    },
+    {
+      icon: Database,
+      label: '已入库',
+      value: m.completedMedia,
+      sub: '媒体文件',
+      tone: 'success' as const,
+    },
+    {
+      icon: Magnet,
+      label: 'qB 种子',
+      value: m.qbittorrent.torrentsCount ?? 0,
+      sub: m.qbittorrent.connected ? 'qBittorrent 在线' : 'qBittorrent 离线',
+      tone: (m.qbittorrent.connected ? 'info' : 'danger') as 'info' | 'danger',
+    },
+  ];
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-7">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">仪表盘</h1>
+        <h1 className="font-display text-[1.8rem] font-bold tracking-tight text-[var(--color-ink)]">
+          仪表盘
+        </h1>
         <p className="mt-1 text-sm text-[var(--color-muted)]">系统运行概览</p>
       </div>
 
       {/* 统计卡 */}
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <StatCard
-          icon={Activity}
-          label="队列任务"
-          value={queueTotal}
-          sub={`导入 ${m.queue.import} · 刮削 ${m.queue.scrape}`}
-          tone="info"
-        />
-        <StatCard
-          icon={Sparkles}
-          label="待刮削"
-          value={m.pendingScrape}
-          sub="等待 AI 识别"
-          tone={m.pendingScrape > 0 ? 'warning' : 'neutral'}
-        />
-        <StatCard
-          icon={Database}
-          label="已入库"
-          value={m.completedMedia}
-          sub="媒体文件"
-          tone="success"
-        />
-        <StatCard
-          icon={Magnet}
-          label="qB 种子"
-          value={m.qbittorrent.torrentsCount ?? 0}
-          sub={m.qbittorrent.connected ? 'qBittorrent 在线' : 'qBittorrent 离线'}
-          tone={m.qbittorrent.connected ? 'info' : 'danger'}
-        />
+        {stats.map((s, i) => (
+          <StatCard key={s.label} {...s} index={i} />
+        ))}
       </div>
 
       <div className="grid gap-4 lg:grid-cols-2">
-        {/* qBittorrent */}
-        <Card>
+        <Card className="stagger" style={{ ['--i' as string]: 0 }}>
           <SectionTitle
             icon={Activity}
             title="qBittorrent"
@@ -88,11 +95,11 @@ export function DashboardPage() {
           <dl className="space-y-3">
             <Row label="版本" value={m.qbittorrent.appVersion ?? '-'} />
             <Row label="种子数" value={m.qbittorrent.torrentsCount ?? '-'} />
+            <Row label="剩余空间" value={formatBytes(m.qbittorrent.freeSpaceBytes)} />
           </dl>
         </Card>
 
-        {/* 任务成功率 */}
-        <Card>
+        <Card className="stagger" style={{ ['--i' as string]: 1 }}>
           <SectionTitle
             icon={TrendingUp}
             title="任务执行"
@@ -111,8 +118,7 @@ export function DashboardPage() {
           )}
         </Card>
 
-        {/* 下载任务状态分布 */}
-        <Card>
+        <Card className="stagger" style={{ ['--i' as string]: 2 }}>
           <SectionTitle icon={Activity} title="下载任务状态" />
           {Object.keys(m.downloadsByStatus).length > 0 ? (
             <div className="flex flex-wrap gap-2">
@@ -127,15 +133,12 @@ export function DashboardPage() {
           )}
         </Card>
 
-        {/* 磁盘 */}
-        <Card>
-          <SectionTitle icon={HardDrive} title="磁盘" />
-          <dl className="space-y-3">
-            <Row
-              label="剩余空间"
-              value={m.qbittorrent.connected ? formatBytes(m.disk.freeBytes) : '未连接'}
-            />
-          </dl>
+        <Card className="stagger" style={{ ['--i' as string]: 3 }}>
+          <SectionTitle icon={HardDrive} title="磁盘占用" />
+          <Row label="剩余空间" value={formatBytes(m.disk.freeBytes)} />
+          <p className="mt-3 text-xs text-[var(--color-faint)]">
+            qB 报告的下载盘剩余空间，媒体库同盘共享
+          </p>
         </Card>
       </div>
     </div>
@@ -148,12 +151,14 @@ function StatCard({
   value,
   sub,
   tone,
+  index,
 }: {
   icon: React.ComponentType<{ className?: string }>;
   label: string;
   value: string | number;
   sub: string;
   tone: 'neutral' | 'info' | 'success' | 'warning' | 'danger';
+  index: number;
 }) {
   const tones: Record<string, string> = {
     neutral: 'bg-[var(--color-surface-2)] text-[var(--color-text-soft)]',
@@ -163,14 +168,14 @@ function StatCard({
     danger: 'bg-[var(--color-danger-soft)] text-[var(--color-danger)]',
   };
   return (
-    <Card className="p-5">
+    <Card className="stagger p-5" style={{ ['--i' as string]: index }}>
       <div className="flex items-center justify-between">
         <span className="text-sm text-[var(--color-muted)]">{label}</span>
-        <span className={`flex size-8 items-center justify-center rounded-lg ${tones[tone]}`}>
+        <span className={cn('flex size-8 items-center justify-center rounded-lg', tones[tone])}>
           <Icon className="size-4" />
         </span>
       </div>
-      <div className="mt-3 text-2xl font-semibold tracking-tight text-[var(--color-text)]">
+      <div className="mt-3 text-[1.75rem] font-bold tracking-tight text-[var(--color-ink)] tnum">
         {value}
       </div>
       <div className="mt-0.5 text-xs text-[var(--color-faint)]">{sub}</div>
@@ -191,7 +196,7 @@ function SectionTitle({
     <div className="mb-4 flex items-center justify-between">
       <div className="flex items-center gap-2">
         <Icon className="size-4 text-[var(--color-faint)]" />
-        <h2 className="font-medium text-[var(--color-text)]">{title}</h2>
+        <h2 className="font-display text-base font-semibold text-[var(--color-ink)]">{title}</h2>
       </div>
       {badge && <Badge tone={badge.tone}>{badge.text}</Badge>}
     </div>
@@ -202,7 +207,7 @@ function Row({ label, value }: { label: string; value: string | number }) {
   return (
     <div className="flex items-center justify-between text-sm">
       <dt className="text-[var(--color-muted)]">{label}</dt>
-      <dd className="font-medium text-[var(--color-text)]">{value}</dd>
+      <dd className="font-medium text-[var(--color-text)] tnum">{value}</dd>
     </div>
   );
 }
@@ -218,7 +223,11 @@ function jobTone(s: string): 'success' | 'danger' | 'info' | 'neutral' {
   return 'neutral';
 }
 function jobLabel(s: string): string {
-  return { success: '成功', failed: '失败', running: '运行中', queued: '排队' }[s] ?? s;
+  return (
+    ({ success: '成功', failed: '失败', running: '运行中', queued: '排队' } as const)[
+      s as 'success'
+    ] ?? s
+  );
 }
 function downloadTone(s: string): 'success' | 'danger' | 'info' | 'warning' | 'neutral' {
   if (['COMPLETED', 'RENAMED', 'EXPORTED'].includes(s)) return 'success';
@@ -229,7 +238,7 @@ function downloadTone(s: string): 'success' | 'danger' | 'info' | 'warning' | 'n
 }
 function downloadLabel(s: string): string {
   return (
-    {
+    ({
       DOWNLOADING: '下载中',
       COMPLETED: '已完成',
       ERROR: '错误',
@@ -237,6 +246,6 @@ function downloadLabel(s: string): string {
       ABANDONED: '已放弃',
       RENAMED: '已重命名',
       PENDING: '等待中',
-    }[s] ?? s
+    } as const)[s as 'DOWNLOADING'] ?? s
   );
 }

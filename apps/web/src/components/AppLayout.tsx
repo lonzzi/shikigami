@@ -50,27 +50,30 @@ export function AppLayout() {
   if (pathname === '/login') return <Outlet />;
 
   return (
-    <div className="flex h-screen">
-      <aside className="flex w-60 shrink-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-surface)]">
+    <div className="relative flex h-screen">
+      {/* 和纸纹理叠层 */}
+      <div className="washi-grain" aria-hidden />
+
+      <aside className="relative z-10 flex w-60 shrink-0 flex-col border-r border-[var(--color-border)] bg-[var(--color-surface)]/80 backdrop-blur-sm">
         {/* Logo */}
         <div className="flex h-16 items-center gap-2.5 px-5">
-          <span className="brush seal flex size-8 items-center justify-center rounded-md text-base">
+          <span className="brush seal flex size-9 items-center justify-center rounded-md text-lg">
             式
           </span>
           <div className="leading-tight">
-            <div className="brush text-base font-semibold text-[var(--color-text)]">式神</div>
-            <div className="text-[10px] font-medium tracking-[0.2em] text-[var(--color-faint)]">
+            <div className="brush text-[1.05rem] font-bold text-[var(--color-ink)]">式神</div>
+            <div className="text-[10px] font-medium tracking-[0.25em] text-[var(--color-faint)]">
               SHIKIGAMI
             </div>
           </div>
         </div>
 
-        {/* 导航(分组) */}
-        <nav className="flex-1 space-y-4 px-3 py-4">
+        {/* 导航（分组）*/}
+        <nav className="flex-1 space-y-5 overflow-y-auto px-3 py-4">
           {NAV_GROUPS.map((group, gi) => (
             <div key={gi} className="space-y-0.5">
               {group.label && (
-                <div className="px-3 pb-1.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--color-faint)]">
+                <div className="px-3 pb-1.5 text-[10px] font-semibold uppercase tracking-[0.15em] text-[var(--color-faint)]">
                   {group.label}
                 </div>
               )}
@@ -89,13 +92,12 @@ export function AppLayout() {
                     )}
                   >
                     {active && (
-                      <span className="absolute left-0 top-1/2 h-5 w-1 -translate-y-1/2 rounded-r-full bg-[var(--color-primary)]" />
+                      <span className="absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r-full bg-[var(--color-primary)]" />
                     )}
                     <Icon
                       size={17}
                       className={cn(
-                        !active &&
-                          'text-[var(--color-faint)] group-hover:text-[var(--color-muted)]',
+                        !active && 'text-[var(--color-faint)] group-hover:text-[var(--color-muted)]',
                       )}
                     />
                     {item.label}
@@ -118,8 +120,8 @@ export function AppLayout() {
         </div>
       </aside>
 
-      <main className="flex-1 overflow-auto bg-[var(--color-bg)]">
-        <div className="fade-in mx-auto max-w-6xl p-8">
+      <main className="relative z-10 flex-1 overflow-auto">
+        <div className="fade-in mx-auto max-w-6xl px-8 py-8">
           <Outlet />
         </div>
       </main>

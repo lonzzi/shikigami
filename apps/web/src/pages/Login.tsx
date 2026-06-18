@@ -31,17 +31,29 @@ export function LoginPage() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center p-6">
-      <div className="fade-in w-full max-w-sm">
+    <div className="relative flex min-h-screen items-center justify-center p-6">
+      <div className="washi-grain" aria-hidden />
+
+      {/* 背景朱印装饰 */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute right-[12%] top-[14%] hidden font-display text-[12rem] leading-none text-[var(--color-primary)] opacity-[0.04] md:block"
+      >
+        神
+      </div>
+
+      <div className="fade-in relative z-10 w-full max-w-sm">
         <div className="mb-8 text-center">
-          <span className="brush seal mx-auto mb-4 flex size-14 items-center justify-center rounded-xl text-2xl">
+          <span className="brush seal mx-auto mb-5 flex size-16 items-center justify-center rounded-xl text-2xl shadow-[var(--shadow-md)]">
             式
           </span>
-          <h1 className="brush text-2xl font-semibold text-[var(--color-text)]">式神 Shikigami</h1>
-          <p className="mt-1.5 text-sm text-[var(--color-muted)]">动漫 BT · AI 刮削 · 自托管工具</p>
+          <h1 className="brush text-3xl font-bold text-[var(--color-ink)]">式神 Shikigami</h1>
+          <p className="mt-2 text-sm tracking-wide text-[var(--color-muted)]">
+            动漫 BT · AI 刮削 · 自托管工具
+          </p>
         </div>
 
-        <form onSubmit={onSubmit} className="card space-y-4 p-6">
+        <form onSubmit={onSubmit} className="card space-y-4 p-7">
           <div>
             <Label>用户名</Label>
             <Input
