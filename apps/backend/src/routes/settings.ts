@@ -11,6 +11,9 @@ import { prisma } from '../lib/prisma';
  * PUT: 写 Settings 表(覆盖 .env)。敏感字段加密。
  */
 
+/** 敏感字段的脱敏占位。前端也用同样的串判断"已设置、未改动"。 */
+const MASK = '••••••••••••';
+
 /** 设置页暴露的字段(只展示这些, 敏感的脱敏)。 */
 const DISPLAY_FIELDS: { key: string; sensitive: boolean }[] = [
   { key: 'LLM_BASE_URL', sensitive: false },

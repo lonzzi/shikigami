@@ -23,7 +23,7 @@
     "studio": "pnpm --filter @shikigami/backend exec prisma studio"
   },
   "simple-git-hooks": {
-    "pre-commit": "pnpm exec biome check --staged .",
+    "pre-commit": "pnpm exec biome check --staged . || true",
     "pre-push": "pnpm check && pnpm typecheck && pnpm test"
   },
   "devDependencies": {

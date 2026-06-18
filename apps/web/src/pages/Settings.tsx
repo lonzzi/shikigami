@@ -13,35 +13,24 @@ const FIELDS: {
   group: string;
   secret?: boolean;
   placeholder?: string;
-  /** 长字段（key/token/url）占满整行，避免半宽挤压。 */
-  full?: boolean;
 }[] = [
   {
     key: 'LLM_BASE_URL',
     label: 'API 地址',
     group: 'AI 刮削',
     placeholder: 'https://api.openai.com/v1',
-    full: true,
   },
-  {
-    key: 'LLM_API_KEY',
-    label: 'API Key',
-    group: 'AI 刮削',
-    secret: true,
-    placeholder: 'sk-...',
-    full: true,
-  },
+  { key: 'LLM_API_KEY', label: 'API Key', group: 'AI 刮削', secret: true, placeholder: 'sk-...' },
   { key: 'LLM_MODEL', label: '模型', group: 'AI 刮削', placeholder: 'glm-5.1' },
   {
     key: 'QBT_BASE_URL',
     label: 'qBittorrent 地址',
     group: '下载器',
     placeholder: 'http://localhost:16280',
-    full: true,
   },
   { key: 'QBT_USERNAME', label: '用户名', group: '下载器' },
   { key: 'QBT_PASSWORD', label: '密码', group: '下载器', secret: true },
-  { key: 'TMDB_API_KEY', label: 'TMDB API Key', group: '元数据', secret: true, full: true },
+  { key: 'TMDB_API_KEY', label: 'TMDB API Key', group: '元数据', secret: true },
 ];
 
 const GROUPS = [...new Set(FIELDS.map((f) => f.group))];
@@ -113,12 +102,10 @@ export function SettingsPage() {
             <div className="card p-5">
               <div className="grid gap-4 sm:grid-cols-2">
                 {FIELDS.filter((f) => f.group === g).map((f) => (
-                  <div key={f.key} className={f.full ? 'sm:col-span-2' : undefined}>
+                  <div key={f.key}>
                     <Label>{f.label}</Label>
                     <Input
                       type={f.secret ? 'password' : 'text'}
-                      // 长字段允许横向滚动，避免超长 token 把布局撑爆
-                      className={f.full ? 'font-mono text-xs' : undefined}
                       value={form[f.key] ?? ''}
                       onChange={(e) => setForm((prev) => ({ ...prev, [f.key]: e.target.value }))}
                       placeholder={
