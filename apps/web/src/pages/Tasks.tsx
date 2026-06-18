@@ -3,6 +3,7 @@ import {
   Download,
   Link as LinkIcon,
   Loader2,
+  MoreHorizontal,
   Pause,
   Play,
   RotateCcw,
@@ -12,6 +13,23 @@ import {
 import { useCallback, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Badge, Card, EmptyState, Input, SectionHeader } from '@/components/ui/primitives';
 import { authHeaders, rpc } from '@/lib/api';
 import { cn, formatBytes, formatDate } from '@/lib/utils';
@@ -50,6 +68,7 @@ export function TasksPage() {
   const [filter, setFilter] = useState('');
   const [search, setSearch] = useState('');
   const [magnet, setMagnet] = useState('');
+  const [deleteTarget, setDeleteTarget] = useState<Task | null>(null);
 
   const { data, fetchNextPage, hasNextPage, isFetchingNextPage, isLoading } =
     useInfiniteQuery<Page>({
@@ -184,19 +203,25 @@ export function TasksPage() {
         }
       />
 
-      {/* 过滤 + 搜索 */}
+      {/* 过滤(分段控件) + 搜索 */}
       <div className="flex flex-wrap items-center gap-3">
-        <div className="flex flex-wrap gap-1.5">
+        <div
+          role="tablist"
+          aria-label="任务状态过滤"
+          className="inline-flex items-center gap-1 rounded-[var(--radius)] border border-[var(--color-border)] bg-[var(--color-surface)] p-1"
+        >
           {FILTERS.map((f) => (
             <button
               key={f.key}
+              role="tab"
               type="button"
+              aria-selected={filter === f.key}
               onClick={() => setFilter(f.key)}
               className={cn(
-                'rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors',
+                'inline-flex items-center justify-center whitespace-nowrap rounded-[var(--radius-sm)] px-3 py-1.5 text-sm font-medium transition-all',
                 filter === f.key
-                  ? 'bg-[var(--color-primary)] text-white'
-                  : 'bg-[var(--color-surface)] text-[var(--color-text-soft)] hover:bg-[var(--color-surface-2)]',
+                  ? 'bg-[var(--color-primary-soft)] text-[var(--color-primary)]'
+                  : 'text-[var(--color-text-soft)] hover:text-[var(--color-text)]',
               )}
             >
               {f.label}
@@ -229,8 +254,14 @@ export function TasksPage() {
         </Card>
       ) : (
         <div className="space-y-2.5">
-          {tasks.map((t) => (
-            <TaskCard key={t.id} task={t} onAction={taskAction} onDelete={() => delM.mutate(t)} />
+          {tasks.map((t, i) => (
+            <TaskCard
+              key={t.id}
+              task={t}
+              index={i}
+              onAction={taskAction}
+              onRequestDelete={() => setDeleteTarget(t)}
+            />
           ))}
 
           {/* 滚动加载哨兵 */}
@@ -243,7 +274,7 @@ export function TasksPage() {
               <span className="text-xs text-[var(--color-faint)]">滚动加载更多</span>
             ) : (
               tasks.length > 0 && (
-                <span className="text-xs text-[var(--color-faint)]">
+                <span className="text-xs text-[var(--color-faint)] tnum">
                   已全部加载 · 共 {total} 个
                 </span>
               )
@@ -251,26 +282,54 @@ export function TasksPage() {
           </div>
         </div>
       )}
+
+      {/* 删除确认 */}
+      <AlertDialog
+        open={!!deleteTarget}
+        onOpenChange={(open) => !open && setDeleteTarget(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>删除任务？</AlertDialogTitle>
+            <AlertDialogDescription>
+              确定删除「{deleteTarget?.rawTitle}」吗？将删除任务记录（保留已下载数据）。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (deleteTarget) delM.mutate(deleteTarget);
+                setDeleteTarget(null);
+              }}
+            >
+              删除
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
 
 function TaskCard({
   task,
+  index,
   onAction,
-  onDelete,
+  onRequestDelete,
 }: {
   task: Task;
+  index: number;
   onAction: (t: Task, a: 'pause' | 'resume' | 'retry' | 'redownload' | 'import', l: string) => void;
-  onDelete: () => void;
+  onRequestDelete: () => void;
 }) {
   const isDl = task.status === 'DOWNLOADING';
   return (
-    <Card className="space-y-3 py-4">
+    <Card className="stagger space-y-3 py-4" style={{ ['--i' as string]: index }}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0 flex-1">
           <div className="truncate font-medium text-[var(--color-text)]">{task.rawTitle}</div>
-          <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-[var(--color-muted)]">
+          <div className="mt-1.5 flex flex-wrap items-center gap-2 text-xs text-[var(--color-muted)] tnum">
             <Badge tone={downloadTone(task.status)}>{downloadLabel(task.status)}</Badge>
             {task.subscription && <Badge tone="primary">订阅: {task.subscription.name}</Badge>}
             {task.fansub && <span>{task.fansub}</span>}
@@ -287,51 +346,48 @@ function TaskCard({
             {task.addedAt && <span>· {formatDate(task.addedAt)}</span>}
           </div>
         </div>
-        <div className="flex shrink-0 gap-1">
-          {isDl && (
+
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
             <Button
               variant="ghost"
               size="icon-sm"
-              title="暂停"
-              onClick={() => onAction(task, 'pause', '暂停')}
+              aria-label="任务操作"
+              className="shrink-0"
             >
-              <Pause className="size-4" />
+              <MoreHorizontal className="size-4" />
             </Button>
-          )}
-          {task.status === 'PAUSED' && (
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              title="恢复"
-              onClick={() => onAction(task, 'resume', '恢复')}
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            {isDl && (
+              <DropdownMenuItem onSelect={() => onAction(task, 'pause', '暂停')}>
+                <Pause className="size-4" /> 暂停
+              </DropdownMenuItem>
+            )}
+            {task.status === 'PAUSED' && (
+              <DropdownMenuItem onSelect={() => onAction(task, 'resume', '恢复')}>
+                <Play className="size-4" /> 恢复
+              </DropdownMenuItem>
+            )}
+            {task.status === 'COMPLETED' && (
+              <DropdownMenuItem onSelect={() => onAction(task, 'import', '导入')}>
+                <LinkIcon className="size-4" /> 导入媒体库
+              </DropdownMenuItem>
+            )}
+            {task.status === 'ERROR' && (
+              <DropdownMenuItem onSelect={() => onAction(task, 'retry', '重试')}>
+                <RotateCcw className="size-4" /> 重试
+              </DropdownMenuItem>
+            )}
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onSelect={onRequestDelete}
+              className="text-[var(--color-danger)] focus:text-[var(--color-danger)]"
             >
-              <Play className="size-4" />
-            </Button>
-          )}
-          {task.status === 'COMPLETED' && (
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              title="导入媒体库"
-              onClick={() => onAction(task, 'import', '导入')}
-            >
-              <LinkIcon className="size-4" />
-            </Button>
-          )}
-          {task.status === 'ERROR' && (
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              title="重试"
-              onClick={() => onAction(task, 'retry', '重试')}
-            >
-              <RotateCcw className="size-4" />
-            </Button>
-          )}
-          <Button variant="ghost" size="icon-sm" title="删除" onClick={onDelete}>
-            <Trash2 className="size-4" />
-          </Button>
-        </div>
+              <Trash2 className="size-4" /> 删除
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       </div>
       {isDl && (
         <div className="flex items-center gap-3">
@@ -341,7 +397,7 @@ function TaskCard({
               style={{ width: `${Math.round(task.progress * 100)}%` }}
             />
           </div>
-          <span className="w-10 text-right text-xs font-medium text-[var(--color-muted)]">
+          <span className="w-10 text-right text-xs font-medium text-[var(--color-muted)] tnum">
             {Math.round(task.progress * 100)}%
           </span>
         </div>

@@ -1,11 +1,34 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Link as LinkIcon, ListChecks, Play, Plus, Trash2 } from 'lucide-react';
+import { Link as LinkIcon, ListChecks, MoreHorizontal, Play, Plus, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { Badge, Card, EmptyState, Input, Label, SectionHeader } from '@/components/ui/primitives';
 import { rpc } from '@/lib/api';
-import { formatDate } from '@/lib/utils';
+import { cn, formatDate } from '@/lib/utils';
 
 type Sub = {
   id: string;
@@ -30,7 +53,8 @@ export function SubscriptionsPage() {
       return res.json();
     },
   });
-  const [showForm, setShowForm] = useState(false);
+  const [formOpen, setFormOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<Sub | null>(null);
 
   const runMutation = useMutation({
     mutationFn: async (id: string) => {
@@ -95,14 +119,21 @@ export function SubscriptionsPage() {
               onChange={(e) => setSearch(e.target.value)}
               placeholder="搜索订阅 / 番剧"
             />
-            <Button onClick={() => setShowForm((v) => !v)}>
+            <Button onClick={() => setFormOpen(true)}>
               <Plus className="size-4" /> 新建订阅
             </Button>
           </div>
         }
       />
 
-      {showForm && <SubscriptionForm onDone={() => setShowForm(false)} />}
+      <Dialog open={formOpen} onOpenChange={setFormOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>新建订阅</DialogTitle>
+          </DialogHeader>
+          <SubscriptionForm onDone={() => setFormOpen(false)} />
+        </DialogContent>
+      </Dialog>
 
       {isLoading ? (
         <Card>
@@ -115,7 +146,7 @@ export function SubscriptionsPage() {
             title="还没有订阅"
             desc="创建一个订阅，配置站点和关键词，系统会自动抓取并下载匹配的番剧"
             action={
-              <Button onClick={() => setShowForm(true)}>
+              <Button onClick={() => setFormOpen(true)}>
                 <Plus className="size-4" /> 新建订阅
               </Button>
             }
@@ -123,8 +154,13 @@ export function SubscriptionsPage() {
         </Card>
       ) : (
         <div className="space-y-3">
-          {data?.map((s) => (
-            <Card key={s.id} hover className="flex items-center justify-between">
+          {data?.map((s, i) => (
+            <Card
+              key={s.id}
+              hover
+              className="stagger flex items-center justify-between"
+              style={{ ['--i' as string]: i }}
+            >
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
                   <span className="font-medium text-[var(--color-text)]">{s.name}</span>
@@ -146,46 +182,74 @@ export function SubscriptionsPage() {
                   )}
                   <span className="text-[var(--color-muted)]">· {s.category}</span>
                 </div>
-                <div className="mt-1 text-xs text-[var(--color-faint)]">
+                <div className="mt-1 text-xs text-[var(--color-faint)] tnum">
                   {s._count?.downloadTasks ?? 0} 个任务 · 上次运行 {formatDate(s.lastRunAt)} · 匹配{' '}
                   {s.lastMatchCount}
                 </div>
               </div>
-              <div className="flex shrink-0 gap-1">
-                <Button variant="ghost" size="icon-sm" title="预览" onClick={() => preview(s.id)}>
-                  <Play className="size-4" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  title="立即运行"
-                  onClick={() => runMutation.mutate(s.id)}
-                >
-                  <ListChecks className="size-4" />
-                </Button>
-                {!s.series && (
+
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
                   <Button
                     variant="ghost"
                     size="icon-sm"
-                    title="关联番剧"
-                    onClick={() => rebindMutation.mutate(s.id)}
+                    aria-label="订阅操作"
+                    className="shrink-0"
                   >
-                    <LinkIcon className="size-4" />
+                    <MoreHorizontal className="size-4" />
                   </Button>
-                )}
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  title="删除"
-                  onClick={() => deleteMutation.mutate(s.id)}
-                >
-                  <Trash2 className="size-4" />
-                </Button>
-              </div>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onSelect={() => preview(s.id)}>
+                    <Play className="size-4" /> 预览匹配
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => runMutation.mutate(s.id)}>
+                    <ListChecks className="size-4" /> 立即运行
+                  </DropdownMenuItem>
+                  {!s.series && (
+                    <DropdownMenuItem onSelect={() => rebindMutation.mutate(s.id)}>
+                      <LinkIcon className="size-4" /> 关联番剧
+                    </DropdownMenuItem>
+                  )}
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    onSelect={() => setDeleteTarget(s)}
+                    className="text-[var(--color-danger)] focus:text-[var(--color-danger)]"
+                  >
+                    <Trash2 className="size-4" /> 删除
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </Card>
           ))}
         </div>
       )}
+
+      {/* 删除确认 */}
+      <AlertDialog
+        open={!!deleteTarget}
+        onOpenChange={(open) => !open && setDeleteTarget(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>删除订阅？</AlertDialogTitle>
+            <AlertDialogDescription>
+              确定删除订阅「{deleteTarget?.name}」吗？此操作不可撤销，已下载的任务不受影响。
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (deleteTarget) deleteMutation.mutate(deleteTarget.id);
+                setDeleteTarget(null);
+              }}
+            >
+              删除
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
@@ -218,8 +282,7 @@ function SubscriptionForm({ onDone }: { onDone: () => void }) {
   });
 
   return (
-    <Card className="space-y-4">
-      <h2 className="font-medium text-[var(--color-text)]">新建订阅</h2>
+    <div className="space-y-4">
       <div className="grid gap-4 sm:grid-cols-2">
         <div>
           <Label>名称</Label>
@@ -250,11 +313,12 @@ function SubscriptionForm({ onDone }: { onDone: () => void }) {
                   prev.includes(s) ? prev.filter((x) => x !== s) : [...prev, s],
                 )
               }
-              className={`rounded-[var(--radius)] border px-3 py-1.5 text-sm transition-colors ${
+              className={cn(
+                'rounded-[var(--radius)] border px-3 py-1.5 text-sm transition-colors',
                 sources.includes(s)
                   ? 'border-[var(--color-primary)] bg-[var(--color-primary-soft)] text-[var(--color-primary)]'
-                  : 'border-[var(--color-border-strong)] text-[var(--color-text-soft)] hover:bg-[var(--color-surface-2)]'
-              }`}
+                  : 'border-[var(--color-border-strong)] text-[var(--color-text-soft)] hover:bg-[var(--color-surface-2)]',
+              )}
             >
               {s}
             </button>
@@ -281,6 +345,6 @@ function SubscriptionForm({ onDone }: { onDone: () => void }) {
           取消
         </Button>
       </div>
-    </Card>
+    </div>
   );
 }
