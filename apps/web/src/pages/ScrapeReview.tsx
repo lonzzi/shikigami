@@ -11,7 +11,13 @@ type PendingFile = {
   fileName: string;
   scrapeState: string;
   scrapeResult: string | null;
-  series?: { titleCn: string | null; titleJp: string } | null;
+  series?: {
+    titleCn: string | null;
+    titleJp: string;
+    tmdbId?: number | null;
+    posterUrl?: string | null;
+    year?: number | null;
+  } | null;
 };
 
 export function ScrapeReviewPage() {
@@ -139,7 +145,20 @@ export function ScrapeReviewPage() {
                         <Badge tone={f.scrapeState === 'FAILED' ? 'danger' : 'warning'}>
                           {f.scrapeState === 'FAILED' ? '识别失败' : '待确认'}
                         </Badge>
-                        {f.series && <span>→ {f.series.titleCn ?? f.series.titleJp}</span>}
+                        {f.series && (
+                          <>
+                            <span className="text-[var(--color-faint)]">→</span>
+                            <Badge tone="primary">
+                              {f.series.titleCn ?? f.series.titleJp}
+                              {f.series.year ? ` · ${f.series.year}` : ''}
+                            </Badge>
+                            {f.series.tmdbId ? (
+                              <Badge tone="success">TMDB 已绑</Badge>
+                            ) : (
+                              <Badge tone="neutral">未绑 TMDB</Badge>
+                            )}
+                          </>
+                        )}
                       </div>
                       {meta && (
                         <div className="mt-2 flex flex-wrap gap-1.5">

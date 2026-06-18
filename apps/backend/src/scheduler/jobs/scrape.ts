@@ -61,13 +61,9 @@ export async function runScrapeTask(mediaFileId: string): Promise<void> {
     data: { scrapeState: 'MATCHED', scrapeResult: JSON.stringify(meta), scrapedAt: new Date() },
   });
 
-  // 2. 高置信且不待审 → 直接进入重命名；否则留 MATCHED 等人工
-  if (meta.needs_review || meta.confidence < env.LLM_REVIEW_THRESHOLD) {
-    log.info({ confidence: meta.confidence }, 'low confidence, waiting for review');
-    return;
-  }
-
-  // 2.5 解析 series: 优先继承 DownloadTask.seriesId, 否则按 title_hint 查/建 Series
+  // 2.5 解析 series: 优先继承 DownloadTask.seriesId, 否则按 title_hint 查/建 Series。
+  //    无论置信度高低都先绑（低置信也预绑 TMDB 候选，让刮削确认页能显示归属；
+  //    绑错可在人工 review 阶段修正）。绑不上留 null 等人工。
   const seriesId = await resolveSeries(mediaFileId, meta);
   if (!seriesId) {
     await prisma.mediaFile.update({
@@ -75,8 +71,14 @@ export async function runScrapeTask(mediaFileId: string): Promise<void> {
       data: { scrapeError: 'series_unresolved' },
     });
     log.warn('series unresolved, waiting for manual series binding');
+  }
+
+  // 3. 高置信且不待审 → 直接进入重命名；否则留 MATCHED 等人工（series 已预绑）
+  if (meta.needs_review || meta.confidence < env.LLM_REVIEW_THRESHOLD) {
+    log.info({ confidence: meta.confidence, seriesId }, 'low confidence, waiting for review');
     return;
   }
+  if (!seriesId) return; // 上面已记 series_unresolved，低置信路径不再继续
 
   await renameAndLink(mediaFileId, meta);
 }

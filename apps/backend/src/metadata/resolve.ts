@@ -82,6 +82,9 @@ export async function resolveByTitle(titleHint: string): Promise<ResolveResult> 
         create: { bangumiId: top.id, titleJp: top.name, titleCn: top.name_cn || null },
         update: {},
       });
+      // 异步 best-effort 回填 TMDB（不阻塞主流程；失败静默）。
+      // Bangumi-only Series 多半是 TMDB 当时限流/网络抖动没命中，事后补一次常有戏。
+      void backfillTmdb(series.id).catch(() => {});
       return { seriesId: series.id, source: 'bangumi' };
     }
   } catch (e) {

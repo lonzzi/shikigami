@@ -27,6 +27,11 @@ function authQuery(): string {
   return '';
 }
 
+/** TMDB key 是否已配置（仅静态判断，不打网络）。供 status 路由/告警用。 */
+export function tmdbConfigured(): boolean {
+  return !!env.TMDB_API_KEY && env.TMDB_API_KEY.trim().length > 0;
+}
+
 /** GET (经 tmdbLimit=4 并发)。TMDB key 缺失时直接抛，避免无谓请求。 */
 async function tmdbGet<T>(path: string): Promise<T> {
   if (!env.TMDB_API_KEY) {

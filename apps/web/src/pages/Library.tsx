@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Film, RefreshCw } from 'lucide-react';
+import { Film, RefreshCw, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Badge, Card, EmptyState, SectionHeader } from '@/components/ui/primitives';
@@ -11,6 +11,7 @@ type Series = {
   titleCn: string | null;
   year: number | null;
   posterUrl: string | null;
+  tmdbId?: number | null;
   _count?: { mediaFiles: number };
 };
 
@@ -36,6 +37,25 @@ export function LibraryPage() {
       }
     },
     onSettled: () => qc.invalidateQueries({ queryKey: ['library'] }),
+  });
+
+  // 手动补 TMDB（Bangumi-only 或缺 TMDB 数据的 Series）
+  const backfillTmdb = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await rpc.api.series[':id']['backfill-tmdb'].$post({ param: { id } });
+      if (!res.ok) {
+        const e = (await res.json().catch(() => ({}))) as { message?: string };
+        throw new Error(e.message ?? 'tmdb_unavailable');
+      }
+      return res.json();
+    },
+    onSuccess: (d: any) => {
+      if (d.ok) toast.success('已补全 TMDB 元数据');
+      else toast.info('未找到匹配的 TMDB 条目');
+      qc.invalidateQueries({ queryKey: ['library'] });
+    },
+    onError: (e: Error) =>
+      toast.error(e.message === 'tmdb_unavailable' ? 'TMDB 不可用（检查 API Key）' : '补全失败'),
   });
 
   return (
@@ -80,6 +100,11 @@ export function LibraryPage() {
                       {s.year}
                     </Badge>
                   )}
+                  {!s.tmdbId && (
+                    <Badge tone="warning" className="backdrop-blur-sm">
+                      未绑 TMDB
+                    </Badge>
+                  )}
                 </div>
               </div>
 
@@ -107,6 +132,17 @@ export function LibraryPage() {
                   >
                     <RefreshCw className="size-3.5" /> 重新刮削
                   </Button>
+                  {!s.tmdbId && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      loading={backfillTmdb.isPending}
+                      onClick={() => backfillTmdb.mutate(s.id)}
+                      title="按标题搜 TMDB 并回填元数据"
+                    >
+                      <Sparkles className="size-3.5" /> 补 TMDB
+                    </Button>
+                  )}
                   <Button
                     variant="ghost"
                     size="sm"

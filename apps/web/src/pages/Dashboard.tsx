@@ -30,6 +30,14 @@ export function DashboardPage() {
     refetchInterval: 10_000,
   });
 
+  // TMDB 接入状态（key 是否配置 + 探活）。未配置/不可用时显示告警。
+  const { data: tmdbStatus } = useQuery<{ configured: boolean; reachable: boolean }>({
+    queryKey: ['tmdb-status'],
+    queryFn: async () => (await rpc.api.metadata.tmdb.status.$get()).json(),
+    refetchInterval: 60_000,
+    retry: false,
+  });
+
   if (isLoading || !m) return <LoadingState />;
 
   const queueTotal = (m.queue.import ?? 0) + (m.queue.scrape ?? 0);
@@ -71,7 +79,24 @@ export function DashboardPage() {
         <h1 className="font-display text-[1.8rem] font-bold tracking-tight text-[var(--color-ink)]">
           仪表盘
         </h1>
-        <p className="mt-1 text-sm text-[var(--color-muted)]">系统运行概览</p>
+        <p className="mt-1 text-sm text-[var(--color-muted)]">
+          系统运行概览
+          {tmdbStatus && !tmdbStatus.configured && (
+            <Badge tone="warning" className="ml-3 align-middle">
+              TMDB Key 未配置 · 刮削仅靠 Bangumi
+            </Badge>
+          )}
+          {tmdbStatus?.configured && !tmdbStatus.reachable && (
+            <Badge tone="danger" className="ml-3 align-middle">
+              TMDB 不可用 · 元数据绑定将退化
+            </Badge>
+          )}
+          {tmdbStatus?.configured && tmdbStatus.reachable && (
+            <Badge tone="success" className="ml-3 align-middle">
+              TMDB 已接入
+            </Badge>
+          )}
+        </p>
       </div>
 
       {/* 统计卡 */}
