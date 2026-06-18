@@ -22,5 +22,20 @@ export default defineConfig({
     outDir: 'dist',
     // 生产构建产物拷贝到 backend/public 由后端托管
     emptyOutDir: true,
+    rollupOptions: {
+      output: {
+        // 拆分 vendor: react 核心 / 路由 / radix 各自独立 chunk，
+        // 浏览器并行下载 + 长期缓存（应用代码变更不致 vendor 失效）。
+        // 用函数形式按 id 前缀匹配，更稳健（覆盖 react/jsx-runtime 等子路径）。
+        manualChunks(id) {
+          if (id.includes('node_modules')) {
+            if (id.includes('/react-dom/') || id.includes('/react/')) return 'react-vendor';
+            if (id.includes('/@tanstack/')) return 'router-vendor';
+            if (id.includes('/@radix-ui/')) return 'radix-vendor';
+            if (id.includes('/lucide-react/')) return 'icon-vendor';
+          }
+        },
+      },
+    },
   },
 });

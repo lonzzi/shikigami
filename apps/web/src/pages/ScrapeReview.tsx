@@ -191,3 +191,5 @@ function ConfidenceBadge({
     </Badge>
   );
 }
+
+export default ScrapeReviewPage;

@@ -335,3 +335,5 @@ function SubscriptionForm({ onDone }: { onDone: () => void }) {
     </div>
   );
 }
+
+export default SubscriptionsPage;

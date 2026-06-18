@@ -419,3 +419,5 @@ function downloadLabel(s: string): string {
     }[s] ?? s
   );
 }
+
+export default TasksPage;

@@ -251,3 +251,5 @@ function downloadLabel(s: string): string {
     )[s as 'DOWNLOADING'] ?? s
   );
 }
+
+export default DashboardPage;

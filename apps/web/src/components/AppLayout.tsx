@@ -8,7 +8,8 @@ import {
   Settings as SettingsIcon,
   Sparkles,
 } from 'lucide-react';
-import { useEffect } from 'react';
+import { Suspense, useEffect } from 'react';
+import { LoadingState } from '@/components/ui/primitives';
 import { clearToken, getToken } from '@/lib/api';
 import { cn } from '@/lib/utils';
 
@@ -47,7 +48,12 @@ export function AppLayout() {
     navigate({ to: '/login' });
   };
 
-  if (pathname === '/login') return <Outlet />;
+  if (pathname === '/login')
+    return (
+      <Suspense fallback={<LoadingState />}>
+        <Outlet />
+      </Suspense>
+    );
 
   return (
     <div className="relative flex h-screen">
@@ -123,7 +129,9 @@ export function AppLayout() {
 
       <main className="relative z-10 flex-1 overflow-auto">
         <div className="fade-in mx-auto max-w-6xl px-8 py-8">
-          <Outlet />
+          <Suspense fallback={<LoadingState />}>
+            <Outlet />
+          </Suspense>
         </div>
       </main>
     </div>

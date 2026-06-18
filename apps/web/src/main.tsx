@@ -3,7 +3,6 @@ import { createRouter, RouterProvider } from '@tanstack/react-router';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Toaster, toast } from 'sonner';
-import { TooltipProvider } from '@/components/ui/tooltip';
 import { clearToken } from './lib/api';
 import { routeTree } from './routes';
 import './index.css';
@@ -37,10 +36,8 @@ declare module '@tanstack/react-router' {
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <TooltipProvider delayDuration={200}>
-        <RouterProvider router={router} />
-        <Toaster theme="light" position="top-right" toastOptions={{ className: 'sonner-toast' }} />
-      </TooltipProvider>
+      <RouterProvider router={router} />
+      <Toaster theme="light" position="top-right" toastOptions={{ className: 'sonner-toast' }} />
     </QueryClientProvider>
   </StrictMode>,
 );
