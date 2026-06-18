@@ -10,7 +10,7 @@
 
 1. **绝对不要用 `git commit --no-verify`**。pre-commit hook (biome check) 和 pre-push hook (typecheck + test + check) 是本地质量门，跳过 = CI 必报错。
 2. **每次 commit 前确认 `pnpm exec biome check .` 通过**（0 error）。修完代码先跑 `pnpm exec biome check --write .` 格式化。
-3. **每次 push 前确认 `pnpm -r typecheck` + `pnpm test` 通过**。push 会触发 pre-push hook 跑这些，失败就推不上去。
+3. **每次 push 前确认 `pnpm check` + `pnpm -r typecheck` 通过**。push 会触发 pre-push hook 跑这些（快速静态检查），失败就推不上去。测试由 CI 跑（CI 注入 env）。
 4. **commit 后等 CI 绿了再继续**。如果 CI 报错，修了再 push，不要攒着。
 5. **biome 忽略 `.claude/` 目录**（其他任务的 worktree），已配在 `biome.json` 的 `includes`。
 

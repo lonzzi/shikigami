@@ -24,7 +24,7 @@
   },
   "simple-git-hooks": {
     "pre-commit": "pnpm exec biome check --staged . || true",
-    "pre-push": "pnpm check && pnpm typecheck && (DATABASE_URL=\"file:./data/dev.db\" JWT_SECRET=test-jwt-secret-32bytes-long ENCRYPTION_KEY=test-encryption-key-32bytes-long LLM_BASE_URL=\"https://api.openai.com/v1\" QBT_BASE_URL=\"http://localhost:8080\" ADMIN_PASSWORD=test pnpm test)"
+    "pre-push": "pnpm check && pnpm typecheck"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.0",

@@ -62,7 +62,7 @@ export function SettingsPage() {
       const updates: Record<string, string> = {};
       for (const f of FIELDS) {
         const v = form[f.key];
-        if (v && v !== '' && v !== '***') updates[f.key] = v;
+        if (v && v !== '' && v !== MASK) updates[f.key] = v;
       }
       if (Object.keys(updates).length === 0) {
         toast.info('没有需要保存的改动');
