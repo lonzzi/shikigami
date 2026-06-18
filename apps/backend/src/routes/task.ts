@@ -26,33 +26,37 @@ export const task = new Hono()
     const page = Math.max(1, Number(c.req.query('page') ?? '1'));
     const pageSize = Math.min(200, Math.max(1, Number(c.req.query('pageSize') ?? '30')));
 
-    // 下载任务页直接反映 qB 所有种子（实时 name/progress/state）,
-    // 按 hash 关联 DB DownloadTask 补 series/subscription 元数据。
-    const all = await listTorrentsDirect();
-    const dbTasks = await prisma.downloadTask.findMany({ include: { subscription: true } });
-    const dbByHash = new Map(dbTasks.filter((t) => t.hash).map((t) => [t.hash!.toLowerCase(), t]));
+    // 只列 shikigami 自己管理的任务(DB DownloadTask: 订阅抓取 + 手动添加)。
+    // qB 里其他软件(nastools/mikan 等)的种子不纳入。
+    // 实时进度/state 从 qB 按 hash 补充(若已在 qB 中)。
+    const dbTasks = await prisma.downloadTask.findMany({
+      orderBy: { addedAt: 'desc' },
+      include: { subscription: true },
+    });
 
-    let items = all.map((t) => {
-      const db = dbByHash.get(t.hash.toLowerCase());
-      const status = mapQbState(t.state);
+    // 一次性取 qB 全量, 内存按 hash join 实时数据
+    const qbAll = await listTorrentsDirect();
+    const qbByHash = new Map(qbAll.map((t) => [t.hash.toLowerCase(), t]));
+
+    let items = dbTasks.map((t) => {
+      const qb = t.hash ? qbByHash.get(t.hash.toLowerCase()) : undefined;
+      const status = qb ? mapQbState(qb.state) : t.status;
       return {
-        id: db?.id ?? t.hash,
-        infoHash: t.hash.toUpperCase(),
-        rawTitle: t.name ?? db?.rawTitle ?? t.hash,
-        fansub: db?.fansub ?? null,
-        subtitleLang: db?.subtitleLang ?? null,
-        sizeBytes: t.size?.toString() ?? '0',
+        id: t.id,
+        infoHash: t.infoHash.toUpperCase(),
+        rawTitle: t.rawTitle,
+        fansub: t.fansub ?? null,
+        subtitleLang: t.subtitleLang ?? null,
+        sizeBytes: (qb?.size ?? t.sizeBytes)?.toString() ?? '0',
         status,
-        qbStateRaw: t.state,
-        progress: t.progress,
-        dlspeed: t.dlspeed,
-        numSeeds: t.numSeeds,
-        numLeechs: t.numLeechs,
-        seriesId: db?.seriesId ?? null,
-        subscription: db?.subscription
-          ? { id: db.subscription.id, name: db.subscription.name }
-          : null,
-        addedAt: db?.addedAt ?? null,
+        qbStateRaw: qb?.state ?? t.qbStateRaw ?? null,
+        progress: qb?.progress ?? t.progress,
+        dlspeed: qb?.dlspeed ?? 0,
+        numSeeds: qb?.numSeeds ?? 0,
+        numLeechs: qb?.numLeechs ?? 0,
+        seriesId: t.seriesId ?? null,
+        subscription: t.subscription ? { id: t.subscription.id, name: t.subscription.name } : null,
+        addedAt: t.addedAt ?? null,
       };
     });
 
