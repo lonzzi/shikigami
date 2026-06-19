@@ -71,7 +71,9 @@ function makeQueue(
       concurrent,
       maxRetries,
       retryDelay: RETRY_DELAY_MS,
-      id: (t: QueueTask) => t.id,
+      // better-queue 3.x: id 用字段名（v2 的同步 (t)=>id 函数签名不再支持，
+      // 会导致任务拿不到 id 被静默丢弃、length 恒为 0）。
+      id: 'id',
     },
   );
 }
