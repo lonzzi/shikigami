@@ -46,7 +46,7 @@ DATABASE_URL="file:$PWD/data/dev.db" JWT_SECRET=... ENCRYPTION_KEY=... LLM_BASE_
 8. **优雅关闭**：pause 队列 → drain(≤30s) → running JobRun 回滚 queued → `PRAGMA wal_checkpoint(TRUNCATE)`（必须用 `$queryRawUnsafe`）→ `$disconnect`。
 9. **qBittorrent 集成走 `lib/qb-direct.ts`**（直接 SID 认证），不用 `@ctrl/qbittorrent`（它在 qB v5 上 cookie 鉴权坏）。`@ctrl/qbittorrent` 只保留 `getAppVersion`/`getApiVersion`/`listTorrents`/`removeTorrent` 等只读操作。
 10. **dmhy magnet 的 btih 是 base32**，`parseInfoHash()` 自动转 hex（qB v5 只认 hex）。
-11. **HTTP 请求走 `lib/http.ts`**，自动从 `HTTPS_PROXY` env 读取代理（Bun fetch 的 `{ proxy }` 选项）。qB 直连(内网)，不走代理。
+11. **HTTP 请求走 `lib/http.ts`**，自动从 `HTTPS_PROXY` env 读取代理（Bun fetch 的 `{ proxy }` 选项）。qB/Jellyfin 直连(内网)，不走代理。**关键坑**：Bun 的裸 `fetch`（不经 lib/http.ts，如 `lib/qb-direct.ts`）也会自动套 `HTTP_PROXY`/`HTTPS_PROXY` env，把内网 qB 请求也走代理 → qB 返回 502。部署 .env **必须配 `NO_PROXY`**（含 qB/jellyfin 的 host + 内网段），例：`NO_PROXY=home.ronki.moe,localhost,127.0.0.1,192.168.0.0/16,10.0.0.0/8`。Bun fetch 尊重 `NO_PROXY`/`no_proxy`。
 
 ## 文件地图
 
