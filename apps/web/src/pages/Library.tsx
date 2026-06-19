@@ -11,8 +11,9 @@ type Series = {
   titleCn: string | null;
   year: number | null;
   posterUrl: string | null;
+  totalEpisodes?: number | null;
   tmdbId?: number | null;
-  _count?: { mediaFiles: number };
+  _count?: { mediaFiles: number; episodes: number };
 };
 
 export function LibraryPage() {
@@ -130,8 +131,11 @@ export function LibraryPage() {
                     {s.titleJp}
                   </div>
                 )}
-                <div className="mt-2 flex items-center gap-1.5">
-                  <Badge tone="info">{s._count?.mediaFiles ?? 0} 集</Badge>
+                <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                  <Badge tone="info">{s._count?.episodes ?? 0} 集</Badge>
+                  {s.totalEpisodes && s.totalEpisodes > (s._count?.episodes ?? 0) && (
+                    <Badge tone="neutral">/ 全 {s.totalEpisodes} 集</Badge>
+                  )}
                 </div>
 
                 <div className="mt-auto flex gap-1.5 pt-3">

@@ -12,7 +12,8 @@ export const library = new Hono()
       where: { mediaFiles: { some: {} } },
       orderBy: { updatedAt: 'desc' },
       include: {
-        _count: { select: { mediaFiles: true } },
+        // episodes 是去重后的真实集数（每集一行）；mediaFiles 是原始文件数（含字幕/重复版本）
+        _count: { select: { mediaFiles: true, episodes: true } },
         mediaFiles: { where: { kind: 'video' }, take: 1 },
       },
     });

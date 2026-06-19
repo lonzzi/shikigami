@@ -1,7 +1,7 @@
 import { prisma } from '../lib/prisma';
 import { logger } from '../logger';
 import { searchSubjects } from './bangumi';
-import { getTv, imageUrl, searchTv } from './tmdb';
+import { getTv, imageUrl, searchTv, type TmdbSeason } from './tmdb';
 
 /**
  * 标题 → Series 绑定（TMDB 优先 + Bangumi 补中文译名）。
@@ -44,6 +44,9 @@ export async function resolveByTitle(titleHint: string): Promise<ResolveResult> 
 
       // tmdbId 在 schema 是 index 非 unique，用 findFirst + create/update（避免迁移）
       const existing = await prisma.series.findFirst({ where: { tmdbId: detail.id } });
+      // seasonOffset: 每季首集的绝对集号（字幕组连续编号时用）。{ [seasonNumber]: firstAbs }
+      // 按 TMDB 季顺序累加 episodeCount（跳过 specials season 0）。best-effort，分cour/合并季可能不准。
+      const seasonOffset = computeSeasonOffset(detail.seasons);
       const data = {
         tmdbId: detail.id,
         tvdbId: detail.tvdbId ?? null,
@@ -55,6 +58,7 @@ export async function resolveByTitle(titleHint: string): Promise<ResolveResult> 
         totalEpisodes: detail.numberOfEpisodes || null,
         posterUrl: imageUrl(detail.posterPath) ?? null,
         metadataRaw: JSON.stringify({ tmdb: detail }),
+        ...(seasonOffset ? { seasonOffset: JSON.stringify(seasonOffset) } : {}),
       };
       let series;
       if (existing) {
@@ -125,4 +129,26 @@ export async function backfillTmdb(seriesId: string): Promise<boolean> {
     return true;
   }
   return false;
+}
+
+/**
+ * 按 TMDB 季结构计算 seasonOffset：{ [seasonNumber]: 该季首集绝对集号 }。
+ * 字幕组常用「全剧连续绝对编号」（S1E12 之后 S2E1 = abs13），此函数按 TMDB 每季 episodeCount 累加。
+ * - 跳过 season 0（Specials）
+ * - best-effort：分 cour / 字幕组按季独立编号 / TMDB 合并季 时不准，需 EpisodeOverride 人工校正
+ * 返回 null 表示无可用季结构（保留原 seasonOffset 不动）。
+ */
+function computeSeasonOffset(seasons: TmdbSeason[] | undefined): Record<string, number> | null {
+  if (!seasons || seasons.length === 0) return null;
+  const regular = seasons
+    .filter((s) => s.seasonNumber >= 1 && s.episodeCount > 0)
+    .sort((a, b) => a.seasonNumber - b.seasonNumber);
+  if (regular.length <= 1) return null; // 单季不需要 offset
+  const out: Record<string, number> = {};
+  let abs = 1; // S1 首集 abs=1
+  for (const s of regular) {
+    out[String(s.seasonNumber)] = abs;
+    abs += s.episodeCount;
+  }
+  return out;
 }
