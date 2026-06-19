@@ -128,13 +128,11 @@ export async function addMagnet(
   const tags = opts.tags?.length ? opts.tags.join(',') : undefined;
   const hash = parseInfoHash(magnet);
 
-  // 1. 预查幂等：已存在 → already_added
+  // 1. 预查幂等：已存在 → already_added（走 qb-direct，@ctrl 在 qB v5 上 login 超时）
   if (hash) {
     try {
-      const existing = await withQb('addMagnet.lookup', (c) =>
-        c.listTorrents({ hashes: hash.toLowerCase() }),
-      );
-      if (existing.length > 0) {
+      const exists = await torrentExists(hash);
+      if (exists) {
         logger.info({ hash }, 'addMagnet: torrent already added (idempotent success)');
         return 'already_added';
       }
