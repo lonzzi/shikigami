@@ -1,6 +1,7 @@
 import { addMagnet } from '../../downloader/qbittorrent';
 import { env } from '../../lib/env';
 import { prisma } from '../../lib/prisma';
+import { fetchTorrentInfoHash } from '../../lib/torrent';
 import { jobLogger } from '../../logger';
 import { registry } from '../../scrapers';
 import type { FilterRule, Torrent } from '../../scrapers/types';
@@ -167,6 +168,24 @@ async function tryEnqueue(
   category: string,
   seriesId: string | null,
 ): Promise<boolean> {
+  // bangumi.moe / mikan 的 RSS 不含 infoHash，只有 torrentFileUrl。
+  // 下载 .torrent 解析出 infoHash，构造 magnet 后走正常入队（CLAUDE.md 待办）。
+  if (!t.infoHash && t.torrentFileUrl) {
+    const parsed = await fetchTorrentInfoHash(t.torrentFileUrl);
+    if (!parsed) {
+      jobLogger('rss-sync').warn(
+        { title: t.title, url: t.torrentFileUrl },
+        '无法解析 infoHash，跳过',
+      );
+      return false;
+    }
+    t.infoHash = parsed.infoHash;
+    if (!t.magnet) t.magnet = `magnet:?xt=urn:btih:${parsed.infoHash}`;
+    jobLogger('rss-sync').info(
+      { title: t.title, infoHash: parsed.infoHash, source: t.source },
+      '从 .torrent 解析出 infoHash',
+    );
+  }
   if (!t.infoHash) return false;
 
   // MagnetSeen 去重（跨订阅）

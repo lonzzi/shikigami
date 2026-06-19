@@ -21,6 +21,7 @@
     "@hono/zod-validator": "catalog:",
     "@prisma/client": "6.19.3",
     "bcryptjs": "3.0.3",
+    "bencode": "^4.0.1",
     "better-queue": "3.8.12",
     "fast-xml-parser": "4.5.3",
     "hono": "catalog:",
@@ -32,6 +33,7 @@
     "zod": "catalog:"
   },
   "devDependencies": {
+    "@types/bencode": "^2.0.4",
     "@types/better-queue": "3.8.6",
     "bun-types": "1.3.11",
     "prisma": "6.19.3",

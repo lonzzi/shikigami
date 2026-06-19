@@ -89,6 +89,36 @@ export async function addMagnetDirect(magnet: string, opts: AddOptions = {}): Pr
   }
 }
 
+/**
+ * 上传 .torrent 文件到 qBittorrent（bangumi.moe/mikan 无 magnet，只有 .torrent）。
+ * 用 FormData 的 `torrents` 字段传文件二进制。
+ * 返回 true=已提交（调用方按 infoHash 回查确认），false=提交失败。
+ */
+export async function addTorrentFileDirect(
+  torrentBuf: Uint8Array,
+  filename: string,
+  opts: AddOptions = {},
+): Promise<boolean> {
+  const form = new FormData();
+  // Blob part: qB 接收 multipart 上传的 torrents 字段（文件二进制）
+  form.append('torrents', new Blob([Buffer.from(torrentBuf)]), filename);
+  if (opts.savePath) form.append('savepath', opts.savePath);
+  if (opts.category) form.append('category', opts.category);
+  if (opts.tags) form.append('tags', opts.tags);
+
+  try {
+    const res = await qbFetch('/api/v2/torrents/add', { method: 'POST', body: form });
+    const text = await res.text();
+    if (text === 'Fails.') {
+      logger.debug({ filename }, 'qB addTorrentFile returned Fails., will verify by lookup');
+    }
+    return true;
+  } catch (e) {
+    logger.warn({ err: (e as Error).message }, 'qB addTorrentFile failed');
+    return false;
+  }
+}
+
 /** 按 infoHash 查种子是否存在。 */
 export async function torrentExists(infoHash: string): Promise<boolean> {
   try {
