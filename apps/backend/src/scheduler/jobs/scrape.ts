@@ -64,8 +64,8 @@ export async function runScrapeTask(mediaFileId: string): Promise<void> {
   // 2.5 解析 series: 优先继承 DownloadTask.seriesId, 否则按 title_hint 查/建 Series。
   //    无论置信度高低都先绑（低置信也预绑 TMDB 候选，让刮削确认页能显示归属；
   //    绑错可在人工 review 阶段修正）。绑不上留 null 等人工。
-  const seriesId = await resolveSeries(mediaFileId, meta);
-  if (!seriesId) {
+  const resolved = await resolveSeries(mediaFileId, meta);
+  if (!resolved) {
     await prisma.mediaFile.update({
       where: { id: mediaFileId },
       data: { scrapeError: 'series_unresolved' },
@@ -73,14 +73,40 @@ export async function runScrapeTask(mediaFileId: string): Promise<void> {
     log.warn('series unresolved, waiting for manual series binding');
   }
 
-  // 3. 高置信且不待审 → 直接进入重命名；否则留 MATCHED 等人工（series 已预绑）
-  if (meta.needs_review || meta.confidence < env.LLM_REVIEW_THRESHOLD) {
-    log.info({ confidence: meta.confidence, seriesId }, 'low confidence, waiting for review');
+  // 3. 客观置信度判定（与 AI 自报 confidence 解耦）：
+  //    高置信 = series 已绑 TMDB（tmdbBound）+ 集号在 TMDB 总集数范围内。
+  //    满足 → 自动重命名入库；否则留 MATCHED 等人工。
+  //    这样无论模型 confidence 多低，只要 title_hint 能 TMDB 命中 + 集号合理就入库。
+  if (!resolved?.tmdbBound) {
+    log.info(
+      { resolved: resolved ? 'not_tmdb_bound' : 'none', confidence: meta.confidence },
+      'series 未绑 TMDB，留待人工审核',
+    );
     return;
   }
-  if (!seriesId) return; // 上面已记 series_unresolved，低置信路径不再继续
+
+  // series 已绑 TMDB → 校验集号是否在范围内
+  const series = await prisma.series.findUnique({
+    where: { id: resolved.seriesId },
+    select: { totalEpisodes: true },
+  });
+  const abs = meta.absolute_episode ?? meta.episode ?? 0;
+  if (!isEpisodeInRange(abs, series?.totalEpisodes ?? null)) {
+    log.info(
+      { abs, totalEpisodes: series?.totalEpisodes, confidence: meta.confidence },
+      '集号越界或无法判定，留待人工审核',
+    );
+    return;
+  }
 
   await renameAndLink(mediaFileId, meta);
+}
+
+/** resolveSeries 结果：seriesId + 该 series 是否 TMDB 权威绑定。 */
+interface ResolvedSeries {
+  seriesId: string;
+  /** series 是否已绑 TMDB（tmdbId 非空）= 客观高置信的必要条件 */
+  tmdbBound: boolean;
 }
 
 /**
@@ -89,7 +115,7 @@ export async function runScrapeTask(mediaFileId: string): Promise<void> {
  * 2) 否则按 meta.title_hint → resolveByTitle（TMDB 绑 tmdbId/tvdbId + Bangumi 补中文译名）
  * 3) 都失败 → 返回 null（留待人工）
  */
-async function resolveSeries(mediaFileId: string, meta: AnimeMeta): Promise<string | null> {
+async function resolveSeries(mediaFileId: string, meta: AnimeMeta): Promise<ResolvedSeries | null> {
   const mf = await prisma.mediaFile.findUnique({
     where: { id: mediaFileId },
     include: { downloadTask: true },
@@ -104,11 +130,15 @@ async function resolveSeries(mediaFileId: string, meta: AnimeMeta): Promise<stri
       where: { downloadTaskId: mf.downloadTask.id, kind: 'video' },
     });
     if (videoCount <= 1) {
+      const inherited = await prisma.series.findUnique({
+        where: { id: mf.downloadTask.seriesId },
+        select: { tmdbId: true },
+      });
       await prisma.mediaFile.update({
         where: { id: mediaFileId },
         data: { seriesId: mf.downloadTask.seriesId },
       });
-      return mf.downloadTask.seriesId;
+      return { seriesId: mf.downloadTask.seriesId, tmdbBound: !!inherited?.tmdbId };
     }
     // 合集种子 → 不继承，走下面的 title_hint 独立判断（每个文件按自身文件名归属）
   }
@@ -128,7 +158,7 @@ async function resolveSeries(mediaFileId: string, meta: AnimeMeta): Promise<stri
   });
   if (local) {
     await prisma.mediaFile.update({ where: { id: mediaFileId }, data: { seriesId: local.id } });
-    return local.id;
+    return { seriesId: local.id, tmdbBound: !!local.tmdbId };
   }
 
   // 3. TMDB 优先查/建（带 tvdbId/tmdbId）+ Bangumi 兜底
@@ -138,7 +168,8 @@ async function resolveSeries(mediaFileId: string, meta: AnimeMeta): Promise<stri
       where: { id: mediaFileId },
       data: { seriesId: result.seriesId },
     });
-    return result.seriesId;
+    // resolveByTitle source='tmdb' 时 series 必有 tmdbId；'bangumi' 兜底则无
+    return { seriesId: result.seriesId, tmdbBound: result.source === 'tmdb' };
   }
   return null;
 }
@@ -183,6 +214,16 @@ export async function renameAndLink(mediaFileId: string, meta: AnimeMeta): Promi
       data: { scrapeError: 'episode_not_resolved' },
     });
     throw new NeedsReviewError('absolute_episode and episode both null/zero');
+  }
+  // 越界兜底：abs 超出 TMDB 总集数 → 解析错，进人工（防止 review 端点绕过 runScrapeTask 校验）
+  if (series.totalEpisodes && series.totalEpisodes > 0 && abs > series.totalEpisodes) {
+    await prisma.mediaFile.update({
+      where: { id: mediaFileId },
+      data: { scrapeError: 'episode_out_of_range' },
+    });
+    throw new NeedsReviewError(
+      `absolute_episode ${abs} exceeds totalEpisodes ${series.totalEpisodes}`,
+    );
   }
   const { season, episode } = mapAbsoluteToSeason(
     abs,
@@ -308,4 +349,16 @@ function parseResolutionScore(scrapeResult: string | null): number {
   } catch {
     return 0;
   }
+}
+
+/**
+ * 集号是否在 TMDB 总集数范围内（客观高置信的必要条件）。
+ * - abs<=0：无效，不可入库
+ * - 有 totalEpisodes：需 1<=abs<=totalEpisodes（越界=解析错，人审）
+ * - 无 totalEpisodes（未绑 TMDB 或 TMDB 无数据）：只要求 abs>0（放宽，让单季/未知总集数也能过）
+ */
+function isEpisodeInRange(abs: number, totalEpisodes: number | null): boolean {
+  if (abs <= 0) return false;
+  if (totalEpisodes == null || totalEpisodes <= 0) return true; // 无权威总集数，放宽
+  return abs >= 1 && abs <= totalEpisodes;
 }
