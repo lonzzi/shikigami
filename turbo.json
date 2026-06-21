@@ -20,10 +20,11 @@
       "outputs": ["dist/**", "apps/backend/public/**"]
     },
     "generate": {
-      "cache": false
+      "cache": false,
+      "outputs": ["generated/**"]
     },
     "typecheck": {
-      "dependsOn": ["^generate"]
+      "dependsOn": ["generate", "^generate", "@shikigami/backend#generate"]
     },
     "test": {
       "dependsOn": ["generate"],
