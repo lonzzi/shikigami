@@ -215,9 +215,12 @@ export async function importDownloadTask(
     return { enumerated: 0, created: 0, skipped: 0 };
   }
 
-  // 预取已存在的 MediaFile（按 sourcePath），实现幂等跳过
+  // 预取已存在的 MediaFile（按 sourcePath 全局查），实现跨 task 幂等跳过。
+  // 不同 DownloadTask 可能指向同一物理文件（合集种子 + 单集种子重复、或多次 import），
+  // 按 sourcePath 全局去重避免同一文件被多个 task 各落一条 MediaFile（数据膨胀）。
+  const filePaths = files.map((f) => f.path);
   const existing = await prisma.mediaFile.findMany({
-    where: { downloadTaskId },
+    where: { sourcePath: { in: filePaths } },
     select: { sourcePath: true },
   });
   const seen = new Set(existing.map((m: { sourcePath: string }) => m.sourcePath));
